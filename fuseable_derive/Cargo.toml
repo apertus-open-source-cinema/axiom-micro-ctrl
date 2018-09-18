@@ -1,0 +1,13 @@
+[package]
+name = "fuseable_derive"
+version = "0.1.0"
+authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
+
+[dependencies]
+syn = "*"
+quote = "*"
+proc-macro2 = "*"
+
+[lib]
+name = "fuseable_derive"
+proc-macro = true

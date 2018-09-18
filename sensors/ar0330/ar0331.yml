@@ -1,0 +1,784 @@
+clks:
+    ext:
+        min: 6000000
+        max: 27000000
+    vco: 
+        min: 384000000
+        max: 768000000 
+plls:
+    mult: 
+        min: 32
+        max: 384
+    pre_div:
+        min: 1
+        max: 64
+    vt_sys_clk_div:
+        values:
+            - 1
+            - 2
+            - 4
+            - 6
+            - 8
+            - 10
+            - 12
+            - 14
+            - 16
+    op_sys_clk_div:
+        values:
+            - 1
+    op_pix_clk_div:
+        values:
+            - 8
+            - 10
+            - 12
+    vt_pix_clk_div:
+        min: 4
+        max: 6
+active_area:
+    width: 2316
+    height: 15555
+
+
+pixel_array_width: 2316
+pixel_array_height: 1555
+window_width_min: 32
+window_width_max: 2304
+window_height_min: 32
+window_height_max: 1544
+
+communication:
+    register:
+        mode: "I2CCDev"
+        bus: 0
+        address: 16
+    io:
+        mode: "MMGPIO"
+        base: 0x41200000
+
+gains:
+    analog_gain:
+        gain_type: "mul"
+        reg_type: "add"
+        regs: 
+            - "analog_gain"
+        stages:
+            fine:
+                - 0:
+                    1.00
+                - 1:
+                    1.03
+                - 2:
+                    1.07
+                - 3:
+                    1.10
+                - 4:
+                    1.14
+                - 5:
+                    1.19
+                - 6:
+                    1.23
+                - 7:
+                    1.28
+                - 8:
+                    1.33
+                - 9:
+                    1.39
+                - 10:
+                    1.45
+                - 11:
+                    1.52
+                - 12:
+                    1.60
+                - 13:
+                    1.68
+                - 14:
+                    1.78
+                - 15:
+                    1.88
+            coarse:
+                - 16:
+                    1
+                - 32:
+                    2
+                - 48:
+                    4
+                - 64:
+                    8
+    digital_gain:
+        gain_type: "add"
+        reg_type: "add"
+        regs: 
+            - "global_gain"
+            - "red_gain"
+            - "blue_gain"
+            - "green1_gain"
+            - "green2_gain"
+        stages:
+            fine:
+                - 0:
+                    0.0
+                - 1:
+                    0.0078125
+                - 2:
+                    0.015625
+                - 3:
+                    0.0234375
+                - 4:
+                    0.03125
+                - 5:
+                    0.0390625
+                - 6:
+                    0.046875
+                - 7:
+                    0.0546875
+                - 8:
+                    0.0625
+                - 9:
+                    0.0703125
+                - 10:
+                    0.078125
+                - 11:
+                    0.0859375
+                - 12:
+                    0.09375
+                - 13:
+                    0.1015625
+                - 14:
+                    0.109375
+                - 15:
+                    0.1171875
+                - 16:
+                    0.125
+                - 17:
+                    0.1328125
+                - 18:
+                    0.140625
+                - 19:
+                    0.1484375
+                - 20:
+                    0.15625
+                - 21:
+                    0.1640625
+                - 22:
+                    0.171875
+                - 23:
+                    0.1796875
+                - 24:
+                    0.1875
+                - 25:
+                    0.1953125
+                - 26:
+                    0.203125
+                - 27:
+                    0.2109375
+                - 28:
+                    0.21875
+                - 29:
+                    0.2265625
+                - 30:
+                    0.234375
+                - 31:
+                    0.2421875
+                - 32:
+                    0.25
+                - 33:
+                    0.2578125
+                - 34:
+                    0.265625
+                - 35:
+                    0.2734375
+                - 36:
+                    0.28125
+                - 37:
+                    0.2890625
+                - 38:
+                    0.296875
+                - 39:
+                    0.3046875
+                - 40:
+                    0.3125
+                - 41:
+                    0.3203125
+                - 42:
+                    0.328125
+                - 43:
+                    0.3359375
+                - 44:
+                    0.34375
+                - 45:
+                    0.3515625
+                - 46:
+                    0.359375
+                - 47:
+                    0.3671875
+                - 48:
+                    0.375
+                - 49:
+                    0.3828125
+                - 50:
+                    0.390625
+                - 51:
+                    0.3984375
+                - 52:
+                    0.40625
+                - 53:
+                    0.4140625
+                - 54:
+                    0.421875
+                - 55:
+                    0.4296875
+                - 56:
+                    0.4375
+                - 57:
+                    0.4453125
+                - 58:
+                    0.453125
+                - 59:
+                    0.4609375
+                - 60:
+                    0.46875
+                - 61:
+                    0.4765625
+                - 62:
+                    0.484375
+                - 63:
+                    0.4921875
+                - 64:
+                    0.5
+                - 65:
+                    0.5078125
+                - 66:
+                    0.515625
+                - 67:
+                    0.5234375
+                - 68:
+                    0.53125
+                - 69:
+                    0.5390625
+                - 70:
+                    0.546875
+                - 71:
+                    0.5546875
+                - 72:
+                    0.5625
+                - 73:
+                    0.5703125
+                - 74:
+                    0.578125
+                - 75:
+                    0.5859375
+                - 76:
+                    0.59375
+                - 77:
+                    0.6015625
+                - 78:
+                    0.609375
+                - 79:
+                    0.6171875
+                - 80:
+                    0.625
+                - 81:
+                    0.6328125
+                - 82:
+                    0.640625
+                - 83:
+                    0.6484375
+                - 84:
+                    0.65625
+                - 85:
+                    0.6640625
+                - 86:
+                    0.671875
+                - 87:
+                    0.6796875
+                - 88:
+                    0.6875
+                - 89:
+                    0.6953125
+                - 90:
+                    0.703125
+                - 91:
+                    0.7109375
+                - 92:
+                    0.71875
+                - 93:
+                    0.7265625
+                - 94:
+                    0.734375
+                - 95:
+                    0.7421875
+                - 96:
+                    0.75
+                - 97:
+                    0.7578125
+                - 98:
+                    0.765625
+                - 99:
+                    0.7734375
+                - 100:
+                    0.78125
+                - 101:
+                    0.7890625
+                - 102:
+                    0.796875
+                - 103:
+                    0.8046875
+                - 104:
+                    0.8125
+                - 105:
+                    0.8203125
+                - 106:
+                    0.828125
+                - 107:
+                    0.8359375
+                - 108:
+                    0.84375
+                - 109:
+                    0.8515625
+                - 110:
+                    0.859375
+                - 111:
+                    0.8671875
+                - 112:
+                    0.875
+                - 113:
+                    0.8828125
+                - 114:
+                    0.890625
+                - 115:
+                    0.8984375
+                - 116:
+                    0.90625
+                - 117:
+                    0.9140625
+                - 118:
+                    0.921875
+                - 119:
+                    0.9296875
+                - 120:
+                    0.9375
+                - 121:
+                    0.9453125
+                - 122:
+                    0.953125
+                - 123:
+                    0.9609375
+                - 124:
+                    0.96875
+                - 125:
+                    0.9765625
+                - 126:
+                    0.984375
+                - 127:
+                    0.9921875
+            coarse:
+                - 0x080:
+                    1
+                - 0x100:
+                    2
+                - 0x180:
+                    3
+                - 0x200:
+                    4
+                - 0x280:
+                    5
+                - 0x300:
+                    6
+                - 0x380:
+                    7
+                - 0x400:
+                    8
+                - 0x480:
+                    9
+                - 0x500:
+                    10
+                - 0x580:
+                    11
+                - 0x600:
+                    12
+                - 0x680:
+                    13
+                - 0x700:
+                    14
+                - 0x780:
+                    15
+
+io: 
+    reset: 
+        pin: 1
+        inverted: true
+    saddr:
+        pin: 2
+
+registers:
+    magic_patch1:
+        address: 0x3ed2
+        width: 2
+    
+    magic_patch2:
+        address: 0x3eda
+        width: 2
+    
+    magic_patch3:
+        address: 0x3edc
+        width: 2
+    
+    magic_patch4:
+        address: 0x305e
+        width: 2
+    
+    magic_init_config:
+        address: 0x3152
+        width: 2
+    
+    magic_init_start:
+        address: 0x304a
+        width: 2
+    
+    chip_version: 
+        address: 0x3000
+        width: 2
+        value: 0x2604
+
+    y_addr_start: 
+        address: 0x3002
+        width: 2
+        min: 6
+
+    x_addr_start: 
+        address: 0x3004
+        width: 2
+        min: 6
+
+    y_addr_end: 
+        address: 0x3006
+        width: 2
+        max: 1549
+
+    x_addr_end: 
+        address: 0x3008
+        width: 2
+        max: 2309
+
+    frame_length_lines: 
+        address: 0x300a
+        width: 2
+
+    line_length_pck: 
+        address: 0x300c
+        width: 2
+
+    chip_revision: 
+        address: 0x300e
+        width: 1
+        v1x: 0x10
+        v2x: 0x20
+
+    lock_control: 
+        address: 0x3010
+        width: 1
+        unlock: 0xbeef
+
+    coarse_integration_time: 
+        address: 0x3012
+        width: 2
+
+    fine_integration_time: 
+        address: 0x3014
+        width: 2
+
+    reset: 
+        address: 0x301a
+        width: 2
+        smia_dis_bit: 12
+        force_pll_on_bit: 11
+        restart_bad_bit: 10
+        mask_bad_bit: 9
+        gpi_en_bit: 8
+        parallel_en_bit: 7
+        drive_pins_bit: 6
+        lock_reg_bit: 3
+        stream_bit: 2
+        restart_bit: 1
+        reset_bit: 0
+
+    mode_select: 
+        address: 0x301c
+        width: 1
+        mode_select_stream_bit: 0
+
+    vt_pix_clk_div: 
+        address: 0x302a
+        width: 2
+
+    vt_sys_clk_div: 
+        address: 0x302c
+        width: 2
+
+    pre_pll_clk_div: 
+        address: 0x302e
+        width: 2
+
+    pll_multiplier: 
+        address: 0x3030
+        width: 2
+
+    op_pix_clk_div: 
+        address: 0x3036
+        width: 2
+
+    op_sys_clk_div: 
+        address: 0x3038
+        width: 2
+
+    frame_count: 
+        address: 0x303a
+        width: 2
+
+    read_mode: 
+        address: 0x3040
+        width: 1
+        vert_flip_bit: 15
+        horiz_mirror_bit: 14
+        col_bin_bit: 13
+        row_bin_bit: 12
+        col_sf_bin_bit: 9
+        col_sum_bit: 5
+
+    extra_delay: 
+        address: 0x3042
+        width: 1
+
+    green1_gain: 
+        address: 0x3056
+        width: 1
+
+    blue_gain: 
+        address: 0x3058
+        width: 1
+
+    red_gain: 
+        address: 0x305a
+        width: 1
+
+    green2_gain: 
+        address: 0x305c
+        width: 1
+
+    global_gain: 
+        address: 0x305e
+        width: 2
+        min: 0
+        def: 1000
+        max: 15992
+
+    analog_gain: 
+        address: 0x3060
+        width: 2
+
+    smia_test: 
+        address: 0x3064
+        width: 2
+        embedded_data_bit: 8
+
+    data_pedestal:
+        address: 0x301e
+        width: 2
+
+    datapath_select: 
+        address: 0x306e
+        width: 2
+        datapath_slew_dout_shift: 13
+        datapath_slew_dout_mask_bit0: 14
+        datapath_slew_dout_mask_bit1: 15
+        datapath_slew_dout_mask_bit2: 16
+        datapath_slew_pclk_shift: 10
+        datapath_slew_pclk_mask_bit0: 11
+        datapath_slew_pclk_mask_bit1: 12
+        datapath_slew_pclk_mask_bit2: 13
+        datapath_high_vcm_bit: 9
+
+    test_pattern_mode: 
+        address: 0x3070
+        width: 2
+
+    test_data_red: 
+        address: 0x3072
+        width: 2
+
+    test_data_greenr: 
+        address: 0x3074
+        width: 2
+
+    test_data_blue: 
+        address: 0x3076
+        width: 2
+    test_data_greenb: 
+        address: 0x3078
+        width: 2
+
+    seq_data_port: 
+        address: 0x3086
+        width: 1
+
+    seq_ctrl_port: 
+        address: 0x3088
+        width: 1
+
+    x_odd_inc: 
+        address: 0x30a2
+        width: 1
+
+    y_odd_inc: 
+        address: 0x30a6
+        width: 1
+
+    x_odd_inc: 
+        address: 0x30a2
+        width: 1
+
+    digital_ctrl: 
+        address: 0x30ba
+        width: 1
+        enable_bit: 5
+
+    reserved_chiprev: 
+        address: 0x30f0
+        width: 2
+
+    data_format_bits: 
+        address: 0x31ac
+        width: 2
+
+    serial_format: 
+        address: 0x31ae
+        width: 2
+
+    frame_preamble: 
+        address: 0x31b0
+        width: 1
+
+    line_preamble: 
+        address: 0x31b2
+        width: 1
+
+    mipi_timing_0: 
+        address: 0x31b4
+        width: 1
+
+    mipi_timing_1: 
+        address: 0x31b6
+        width: 1
+
+    mipi_timing_2: 
+        address: 0x31b8
+        width: 1
+
+    mipi_timing_3: 
+        address: 0x31ba
+        width: 1
+
+    mipi_timing_4: 
+        address: 0x31bc
+        width: 1
+
+    mipi_config_status: 
+        address: 0x31be
+        width: 2
+
+    compression: 
+        address: 0x31d0
+        width: 1
+        enable_bit: 0
+
+    poly_sc: 
+        address: 0x3780
+        width: 1
+        enable_bit: 15
+
+    hispi_control_status:
+        address: 0x31c6
+        width: 2
+
+    hispi_timing:
+        address: 0x31c0
+        width: 2
+
+    hispi_sync_patt:
+        address: 0x31c4
+        width: 2
+
+    frame_status:
+        address: 0x303c
+        width: 2
+
+    digital_test:
+        address: 0x30b0
+        width: 2
+
+    test_raw_mode:
+        address: 0x307a
+        width: 2
+
+    dark_control:
+        address: 0x3180
+        width: 2
+
+    dark_control:
+        address: 0x3044
+        width: 2
+
+        #        conversion:
+        #    factor: 10.2
+        conversion:
+            map: 
+                exclusive: false
+                stream_on: "0"
+                unlock_register: "1" 
+                reset: "2"
+                test_mode: 
+                    range: "3..5"
+                    conversion:
+                        map:
+                            exclusive: true
+                            solid_color: 1
+                            color_bars: 2
+                            color_bars_fade_to_grey: 3
+                            walking_ones: 255
+
+                    
+
+
+                #        conversion: 
+                #            function:
+                #                """
+                #                  
+                #                """
+                    
+        
+
+    column_correction:
+        address: 0x30d4
+        width: 2
+
+
+function:
+    analog_gain:
+        inputs:
+            gain: 
+                type: "f64"
+                continuous: true
+                domain: 
+                    min: 0
+                    max: 16
+            fclk:
+                type: "reg"
+                register: "fclk"
+
+            
+        conversion:
+            """
+            let (coarse, fine) = nearest_gain(gain)
+            write_get("coarse_gain", coarse)
+            write_get("fine_gain", fine)
+            """

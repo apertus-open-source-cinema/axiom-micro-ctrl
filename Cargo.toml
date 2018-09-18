@@ -1,0 +1,29 @@
+[package]
+name = "ctrl"
+version = "0.1.0"
+authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
+
+[dependencies]
+fuseable = { path = "fuseable" }
+fuseable_derive = { path = "fuseable_derive" }
+fuse_mt = "*"
+itertools = "*"
+serde_derive = "*"
+serde_yaml = "*"
+serde = "*"
+
+[build-dependencies]
+fuseable = { path = "fuseable" }
+fuseable_derive = { path = "fuseable_derive" }
+serde = "*"
+serde_derive = "*"
+serde_yaml = "*"
+quote = "*"
+fuse_mt = "*"
+proc-macro2 = "*"
+phf_codegen = "*"
+
+[profile.release]
+lto = true
+codegen-units = 16
+panic = 'abort'

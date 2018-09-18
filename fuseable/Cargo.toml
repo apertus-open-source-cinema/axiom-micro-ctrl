@@ -1,0 +1,13 @@
+[package]
+name = "fuseable"
+version = "0.1.0"
+authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
+
+[dependencies]
+fuse_mt = "*"
+itertools = "*"
+lru = "*"
+time = "*"
+
+[lib]
+name = "fuseable"

@@ -1,0 +1,4 @@
+reset:
+    address: '0x0'
+delay:
+    address: '0x4'

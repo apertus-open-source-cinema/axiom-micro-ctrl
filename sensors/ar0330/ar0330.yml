@@ -1,17 +1,16 @@
 model: "ar0330"
 
 registers:
+    sensor_io:
+        channel:
+            mode: "mmaped-gpio"
+            base: 0x41200000
+        map: "io.yml"
+        functions: "io_functions.yml"
     sensor: 
         channel:
             mode: "i2c-cdev"
-            address: "0x10"
+            bus: 0
+            address: 0x10
         map: "raw.yml"
-    sensor_io:
-        channel:
-            mode: "mmaped_io"
-            base: "0x41200000"
-        map: "io.yml"
-
-functions:
-    - "high_manual.yml"
-    - "io_functions.yml"
+        functions: "high_manual.yml"

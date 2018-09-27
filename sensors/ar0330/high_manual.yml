@@ -59,19 +59,19 @@ coarse_gain:
   description: Coarse Analog gain in context A.
   writable: true
   map:
-      0: 1
-      1: 2
-      2: 4
-      3: 8
+      0: "1.0"
+      1: "2.0"
+      2: "4.0"
+      3: "8.0"
 coarse_gain_cb:
   addr: analog_gain[12:14]
   description: Coarse Analog gain in context B.
   writable: true
   map:
-      0: 1
-      1: 2
-      2: 4
-      3: 8
+      0: 1.0
+      1: 2.0
+      2: 4.0
+      3: 8.0
 coarse_integration_time:
   addr: coarse_integration_time[0:16]
   default: 16

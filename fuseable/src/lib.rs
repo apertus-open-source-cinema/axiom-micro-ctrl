@@ -1,17 +1,18 @@
-extern crate time;
 extern crate fuse_mt;
-extern crate lru;
 extern crate itertools;
+extern crate lru;
+extern crate time;
 
 use fuse_mt::*;
-use std::path::Path;
-use time::*;
-use std::sync::RwLock;
-use lru::LruCache;
-use std::ffi::OsString;
-use std::collections::{BTreeMap, HashMap};
-use std::ops::{Deref, DerefMut};
 use itertools::Itertools;
+use lru::LruCache;
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
+use std::ops::{Deref, DerefMut};
+use std::path::Path;
+use std::sync::RwLock;
+use time::*;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub enum Either<A, B> {
@@ -57,6 +58,7 @@ macro_rules! impl_fuseable_with_to_string {
 }
 
 impl_fuseable_with_to_string!(String);
+impl_fuseable_with_to_string!(bool);
 impl_fuseable_with_to_string!(u8);
 impl_fuseable_with_to_string!(i8);
 impl_fuseable_with_to_string!(u16);
@@ -68,6 +70,33 @@ impl_fuseable_with_to_string!(i64);
 impl_fuseable_with_to_string!(f32);
 impl_fuseable_with_to_string!(f64);
 
+impl<T: Fuseable> Fuseable for Arc<Mutex<T>> {
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        self.lock().unwrap().is_dir(path)
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        self.lock().unwrap().read(path)
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        self.lock().unwrap().write(path, value)
+    }
+}
+
+impl<T: Fuseable> Fuseable for Mutex<T> {
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        self.lock().unwrap().is_dir(path)
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        self.lock().unwrap().read(path)
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        self.lock().unwrap().write(path, value)
+    }
+}
 
 impl<'a> Fuseable for &'a str {
     fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
@@ -77,21 +106,14 @@ impl<'a> Fuseable for &'a str {
         }
     }
 
-    fn read(
-        &self,
-        path: &mut Iterator<Item = &str>,
-    ) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(_) => Err(()),
             None => Ok(Either::Right(self.to_string())),
         }
     }
 
-    fn write(
-        &mut self,
-        path: &mut Iterator<Item = &str>,
-        value: Vec<u8>,
-    ) -> Result<(), ()> {
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         Err(())
     }
 }
@@ -123,9 +145,7 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
                 Some(inner) => inner.is_dir(path),
                 None => Err(()),
             },
-            None => {
-                Ok(true)
-            }
+            None => Ok(true),
         }
     }
 
@@ -155,9 +175,7 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
                 Some(inner) => inner.is_dir(path),
                 None => Err(()),
             },
-            None => {
-                Ok(true)
-            }
+            None => Ok(true),
         }
     }
 
@@ -184,7 +202,7 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
 pub struct CachedFuseable {
     is_dir_cache: RwLock<LruCache<String, Result<bool, ()>>>,
     read_dir_cache: RwLock<LruCache<String, Result<Either<Vec<String>, String>, ()>>>,
-    fuseable: Box<Fuseable>
+    fuseable: Box<Fuseable>,
 }
 
 impl CachedFuseable {
@@ -192,7 +210,7 @@ impl CachedFuseable {
         CachedFuseable {
             is_dir_cache: RwLock::new(LruCache::new(cache_size)),
             read_dir_cache: RwLock::new(LruCache::new(cache_size)),
-            fuseable: fuseable
+            fuseable: fuseable,
         }
     }
 }
@@ -228,9 +246,7 @@ impl Fuseable for CachedFuseable {
 
         let mut update_cache = false;
         let read = match self.read_dir_cache.write().unwrap().get(&path_string) {
-            Some(r) => {
-                r.clone()
-            },
+            Some(r) => r.clone(),
             None => {
                 update_cache = true;
                 Fuseable::read(self.fuseable.deref(), &mut path)
@@ -240,8 +256,11 @@ impl Fuseable for CachedFuseable {
         if update_cache {
             match read {
                 Ok(Either::Left(_)) => {
-                    self.read_dir_cache.write().unwrap().put(path_string, read.clone());
-                },
+                    self.read_dir_cache
+                        .write()
+                        .unwrap()
+                        .put(path_string, read.clone());
+                }
                 _ => {}
             }
         }
@@ -255,7 +274,6 @@ impl Fuseable for CachedFuseable {
         Fuseable::write(self.fuseable.deref_mut(), path, value)
     }
 }
-
 
 impl FilesystemMT for Box<Fuseable> {
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
@@ -272,81 +290,90 @@ impl FilesystemMT for Box<Fuseable> {
         } else {
             //            fn read(&self, path: &mut Iterator<Item = String>) -> Result<Either<Vec<String>, String>, ()>;
 
-            Fuseable::is_dir(self.deref(), &mut path.to_string_lossy().split_terminator('/').skip(1))
-                .map(|v| {
-                    (
-                        Timespec { sec: 0, nsec: 0 },
-                        FileAttr {
-                            size: 4096, // TODO(robin): this is shitty, but needed to convince the vfs to actually use the results of a read
-                            blocks: 0,
-                            atime: Timespec { sec: 0, nsec: 0 },
-                            mtime: Timespec { sec: 0, nsec: 0 },
-                            ctime: Timespec { sec: 0, nsec: 0 },
-                            crtime: Timespec { sec: 0, nsec: 0 },
-                            kind: match v {
-                                true => FileType::Directory,
-                                false => FileType::RegularFile,
-                            },
-                            perm: 0o777,
-                            nlink: 2,
-                            uid: 0,
-                            gid: 0,
-                            rdev: 0,
-                            flags: 0,
+            Fuseable::is_dir(
+                self.deref(),
+                &mut path.to_string_lossy().split_terminator('/').skip(1),
+            ).map(|v| {
+                (
+                    Timespec { sec: 0, nsec: 0 },
+                    FileAttr {
+                        size: 4096, // TODO(robin): this is shitty, but needed to convince the vfs to actually use the results of a read
+                        blocks: 0,
+                        atime: Timespec { sec: 0, nsec: 0 },
+                        mtime: Timespec { sec: 0, nsec: 0 },
+                        ctime: Timespec { sec: 0, nsec: 0 },
+                        crtime: Timespec { sec: 0, nsec: 0 },
+                        kind: match v {
+                            true => FileType::Directory,
+                            false => FileType::RegularFile,
                         },
-                    )
-                }).map_err(|_| 0)
+                        perm: 0o777,
+                        nlink: 2,
+                        uid: 0,
+                        gid: 0,
+                        rdev: 0,
+                        flags: 0,
+                    },
+                )
+            }).map_err(|_| 0)
         }
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         // println!("opendir: {:?} (flags = {:#o})", path, _flags);
 
-        match Fuseable::is_dir(self.deref(), &mut path.to_string_lossy().split_terminator('/').skip(1)) {
+        match Fuseable::is_dir(
+            self.deref(),
+            &mut path.to_string_lossy().split_terminator('/').skip(1),
+        ) {
             Ok(true) => Ok((0, 0)),
             Ok(false) => Err(1),
-            Err(_) => Err(1)
+            Err(_) => Err(1),
         }
     }
 
     fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
         // println!("readdir: {:?}", path);
-        Fuseable::read(self.deref(), &mut path.to_string_lossy().split_terminator('/').skip(1)).map(
-            |v| {
-                match v {
-                    Either::Left(fields) => {
-                        fields.iter().map(|f| {
-                            DirectoryEntry {
-                                name: OsString::from(f),
-                                kind: FileType::Directory
-                            }
-                        }).collect()
-                    }
-                    _ => unimplemented!()
-                }
-            }).map_err(|_| 1)
+        Fuseable::read(
+            self.deref(),
+            &mut path.to_string_lossy().split_terminator('/').skip(1),
+        ).map(|v| match v {
+            Either::Left(fields) => fields
+                .iter()
+                .map(|f| DirectoryEntry {
+                    name: OsString::from(f),
+                    kind: FileType::Directory,
+                }).collect(),
+            _ => unimplemented!(),
+        }).map_err(|_| 1)
     }
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         // println!("open: {:?} flags={:#x}", path, flags);
 
-        match Fuseable::is_dir(self.deref(), &mut path.to_string_lossy().split_terminator('/').skip(1)) {
+        match Fuseable::is_dir(
+            self.deref(),
+            &mut path.to_string_lossy().split_terminator('/').skip(1),
+        ) {
             Ok(false) => Ok((0, 0)),
             Ok(true) => Err(1),
-            Err(_) => Err(1)
+            Err(_) => Err(1),
         }
     }
 
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
         // println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
-        match Fuseable::read(self.deref(), &mut path.to_string_lossy().split_terminator('/').skip(1)) {
+        match Fuseable::read(
+            self.deref(),
+            &mut path.to_string_lossy().split_terminator('/').skip(1),
+        ) {
             Ok(Either::Left(_)) => Err(1),
             Ok(Either::Right(s)) => Ok(s.into_bytes()),
-            Err(_) => Err(1)
+            Err(_) => Err(1),
         }
     }
 
-/*
+    /*
     fn write(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
         println!("write: {:?} {:#x} @ {:#x}", path, data.len(), offset);
 

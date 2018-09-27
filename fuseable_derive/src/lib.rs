@@ -1,4 +1,4 @@
-#![recursion_limit="512"]
+#![recursion_limit = "512"]
 
 extern crate proc_macro;
 extern crate proc_macro2;
@@ -7,15 +7,15 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
-use proc_macro2::{TokenStream, Ident, Span};
 use proc_macro::TokenStream as TS;
-use syn::DeriveInput;
-use syn::Data::{Struct, Enum};
+use proc_macro2::{Ident, Span, TokenStream};
+use syn::Data::{Enum, Struct};
+use syn::{DeriveInput, Field};
+use std::fmt::Debug;
 
-
-#[proc_macro_derive(Fuseable)]
+#[proc_macro_derive(Fuseable, attributes(fuseable))]
 pub fn fuse_derive(input: TS) -> TS {
-    let ast = parse_macro_input!(input as DeriveInput); 
+    let ast = parse_macro_input!(input as DeriveInput);
     let gen = impl_fuseable(&ast);
     gen.into()
 }
@@ -39,27 +39,135 @@ fn impl_fuseable(ast: &syn::DeriveInput) -> TokenStream {
             }
         }
     };
-    
+
     ret
 }
 
+#[derive(Default, Debug)]
+struct VirtualField {
+    name: Option<String>,
+    is_dir: Option<String>,
+    read: Option<String>,
+    write: Option<String>
+}
+
 fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) {
+    let attrs: Vec<_> = ast.attrs.iter().filter(|a| {
+        a.path.segments.iter().map(|s| &s.ident).next().unwrap() == "fuseable"
+    }).collect();
+
+    use syn::{
+        Meta::{
+            List,
+            NameValue,
+        },
+        MetaNameValue,
+        MetaList,
+        NestedMeta::Meta,
+        token::Paren
+    };
+
+    let mut virtual_fields = Vec::new();
+
+    fn lit_to_direct_string(lit: &syn::Lit) -> String {
+        match lit {
+            syn::Lit::Str(str) => {
+                str.value()
+            }
+            _ => {
+                panic!("could not convert literal to string: {:?}", lit)
+            }
+        }
+    }
+
+    for attr in &attrs {
+        match &attr.interpret_meta() {
+            Some(syn::Meta::List(syn::MetaList { nested, ident, paren_token } )) => {
+                for nested_meta in nested {
+                    match nested_meta {
+                        Meta(List(MetaList { nested, ident, paren_token} )) => {
+                            if ident == "virtual_field" {
+                                let mut virtual_field: VirtualField = Default::default();
+                                for nested_meta in nested {
+                                    match nested_meta {
+                                        Meta(NameValue(MetaNameValue { ident, eq_token, lit })) => {
+                                            if ident == "name" {
+                                                virtual_field.name = Some(lit_to_direct_string(lit))
+                                            } else if ident == "is_dir" {
+                                                virtual_field.is_dir = Some(lit_to_direct_string(lit))
+                                            } else if ident == "read" {
+                                                virtual_field.read = Some(lit_to_direct_string(lit))
+                                            } else if ident == "write" {
+                                                virtual_field.write = Some(lit_to_direct_string(lit))
+                                            }
+                                        }
+                                        Comma => {}
+                                    }
+                                }
+
+                                virtual_fields.push(virtual_field);
+                            } else {
+                                panic!("unhandled meta {:?}", attrs)
+                            }
+                        },
+                        _ => {
+                            panic!("unhandled meta {:?}", nested_meta)
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for virtual_field in &virtual_fields {
+        println!();
+        println!("name: {}", virtual_field.name.clone().unwrap());
+        println!("is_dir: {}", virtual_field.is_dir.clone().unwrap());
+        println!("read: {}", virtual_field.read.clone().unwrap());
+        println!("write: {}", virtual_field.write.clone().unwrap());
+    }
+
+// &attr.interpret_meta()
+
     match ast.data {
-        Struct(ref data) => impl_struct(data),
-        Enum(ref data) => impl_enum(&ast.ident, data),
-        _ => unimplemented!()
+        Struct(ref data) => {
+            impl_struct(data, &virtual_fields)
+        },
+        Enum(ref data) => {
+            if virtual_fields.len() > 0 {
+                panic!("cannot handle virtual fields in enums yet");
+            }
+
+            impl_enum(&ast.ident, data)
+        },
+        _ => unimplemented!(),
     }
 }
 
-fn impl_struct(data: &syn::DataStruct) -> (TokenStream, TokenStream, TokenStream) {
+fn impl_struct(data: &syn::DataStruct, virtual_fields: &Vec<VirtualField>) -> (TokenStream, TokenStream, TokenStream) {
     let (is_dir, read, write) = match data.fields {
         syn::Fields::Named(ref fields) => {
-            let fields_normal: Vec<_> = fields.named.iter().map(|f| &f.ident).map(|f| quote! { #f }).collect();
-            let wrapped_fields: Vec<_> = fields.named.iter().map(|f| &f.ident).map(|f| quote! { &self.#f }).collect();
+            /*
+            let fields_normal: Vec<_> = fields
+                .named
+                .iter()
+                .map(|f| &f.ident)
+                .map(|f| quote! { #f })
+                .collect();
+            let wrapped_fields: Vec<_> = fields
+                .named
+                .iter()
+                .map(|f| &f.ident)
+                .map(|f| quote! { &self.#f })
+                .collect();
+            */
 
-            impl_fields(&fields_normal, &wrapped_fields)
-        },
-        _ => unimplemented!() 
+            let prefix = quote! { &self. };
+
+            impl_fields(&fields.named.iter().collect(), &prefix)
+        }
+        _ => unimplemented!(),
     };
 
     (is_dir, read, write)
@@ -98,38 +206,30 @@ fn impl_enum(name: &Ident, data: &syn::DataEnum) -> (TokenStream, TokenStream, T
 }
 
 fn impl_enum_variant(variant: &syn::Variant) -> (TokenStream, TokenStream, TokenStream) {
-    let name = &variant.ident; 
+    let name = &variant.ident;
 
     let (is_dir, read, write) = match variant.fields {
         syn::Fields::Named(ref fields) => {
-            let fields: Vec<_> = fields.named.iter().map(|f| &f.ident).collect();
-            
-            if fields.len() == 1 {
-                let name = fields[0].clone().unwrap();
-                let wrapped_name = quote! {
-                    { #name }
-                };
+            let fields: Vec<_> = fields.named.iter().collect();
 
-                impl_enum_variant_flatten(&name, wrapped_name)
+            if fields.len() == 1 {
+                let name = fields[0].clone();
+                impl_enum_variant_flatten(&name, false)
             } else {
-                impl_enum_variant_namend(&fields.into_iter().map(|i| i.clone().unwrap()).collect())
+                impl_enum_variant_namend(&fields)
             }
         }
         syn::Fields::Unnamed(ref fields) => {
             let fields: Vec<_> = fields.unnamed.iter().collect();
             if fields.len() != 1 {
-                unimplemented!() 
+                unimplemented!()
             } else {
-                let name = Ident::new("value", Span::call_site());
-
-                let wrapped_name = quote! {
-                    ( #name )
-                };
-
-                impl_enum_variant_flatten(&name, wrapped_name)
+                let mut field = fields[0].clone();
+                field.ident = Some(Ident::new("value", Span::call_site()));
+                impl_enum_variant_flatten(&field, true)
             }
         }
-        _ => unimplemented!()
+        _ => unimplemented!(),
     };
 
     let is_dir = quote! {
@@ -147,7 +247,22 @@ fn impl_enum_variant(variant: &syn::Variant) -> (TokenStream, TokenStream, Token
     (is_dir, read, write)
 }
 
-fn impl_enum_variant_flatten(name: &syn::Ident, wrapped_name: TokenStream) -> (TokenStream, TokenStream, TokenStream) {
+fn impl_enum_variant_flatten(
+    name: &syn::Field,
+    unnamed: bool
+) -> (TokenStream, TokenStream, TokenStream) {
+    let name = name.ident.clone().unwrap();
+    let wrapped_name = if unnamed {
+        quote! {
+            ( #name )
+        }
+    } else {
+        quote! {
+            { #name }
+        }
+
+    };
+
     let is_dir = quote! {
         #wrapped_name => Fuseable::is_dir(#name, path)
     };
@@ -163,21 +278,25 @@ fn impl_enum_variant_flatten(name: &syn::Ident, wrapped_name: TokenStream) -> (T
     (is_dir, read, write)
 }
 
-fn impl_enum_variant_namend(fields: &Vec<syn::Ident>) -> (TokenStream, TokenStream, TokenStream) {
-    let fields_is_dir: Vec<_> = fields.iter().map(|f| quote! { #f }).collect();
+fn impl_enum_variant_namend(fields: &Vec<&syn::Field>) -> (TokenStream, TokenStream, TokenStream) {
+    let fields_is_dir: Vec<_> = fields.iter().map(|f| {
+        let f = f.ident.clone().unwrap();
+        quote! { #f }
+    }).collect();
     let fields_read: Vec<_> = fields_is_dir.clone();
 
-    let (fields_impl_is_dir, fields_impl_read, fields_impl_write) = impl_fields(&fields_is_dir, &fields_is_dir);
+    let (fields_impl_is_dir, fields_impl_read, fields_impl_write) =
+        impl_fields(&fields, &quote! {});
 
     let is_dir = quote! {
         { #(#fields_is_dir),* } => {
-            #fields_impl_is_dir             
+            #fields_impl_is_dir
         }
     };
 
     let read = quote! {
         { #(#fields_read),* } => {
-            #fields_impl_read             
+            #fields_impl_read
         }
     };
 
@@ -190,12 +309,53 @@ fn impl_enum_variant_namend(fields: &Vec<syn::Ident>) -> (TokenStream, TokenStre
     (is_dir, read, write)
 }
 
-fn impl_fields(fields: &Vec<TokenStream>, wrapped_fields: &Vec<TokenStream>) -> (TokenStream, TokenStream, TokenStream) {
+struct ParsedField {
+    ident: Ident,
+    skip: bool,
+}
+
+fn parse_field(field: &&syn::Field) -> ParsedField {
+    let ident = field.ident.clone().unwrap();
+
+    let attrs: Vec<_> = field.attrs.iter().filter(|a| {
+        a.path.segments.iter().map(|s| &s.ident).next().unwrap() == "fuseable"
+    }).collect();
+
+    let mut skip = false;
+
+    for attr in attrs {
+        match &attr.interpret_meta() {
+            Some(syn::Meta::List(syn::MetaList { nested, ident, paren_token } )) => {
+                match nested.iter().next() {
+                    Some(syn::NestedMeta::Meta(syn::Meta::Word(ident))) => {
+                        skip = ident == "skip"
+                    },
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    ParsedField {
+        ident: ident,
+        skip: skip,
+    }
+}
+
+fn impl_fields(
+    fields: &Vec<&Field>,
+    prefix: &TokenStream,
+) -> (TokenStream, TokenStream, TokenStream) {
+    let fields: Vec<_> = fields.iter().map(parse_field).filter(|f| !f.skip).map(|f| f.ident.clone()).collect();
+    let wrapped_fields: Vec<_> = fields.iter().map(|f| quote!{ #prefix #f }).collect();
     let fields2 = fields.clone();
+    let fields3 = fields.clone();
+    let wrapped_fields2 = wrapped_fields.clone();
 
     let read = quote! {
         match path.next() {
-            Some(name) => {
+            Some(ref name) => {
                 match name.as_ref() {
                     #(stringify!(#fields) => Fuseable::read(#wrapped_fields, path), )*
                     _ => Err(())
@@ -207,9 +367,9 @@ fn impl_fields(fields: &Vec<TokenStream>, wrapped_fields: &Vec<TokenStream>) -> 
 
     let is_dir = quote! {
         match path.next() {
-            Some(name) => {
+            Some(ref name) => {
                 match name.as_ref() {
-                    #(stringify!(#fields) => Fuseable::is_dir(#wrapped_fields, path), )*
+                    #(stringify!(#fields3) => Fuseable::is_dir(#wrapped_fields2, path), )*
                     _ => Err(())
                 }
             }

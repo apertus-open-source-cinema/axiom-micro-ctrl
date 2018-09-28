@@ -165,7 +165,7 @@ fn impl_struct(data: &syn::DataStruct, virtual_fields: &Vec<VirtualField>) -> (T
 
             let prefix = quote! { &self. };
 
-            impl_fields(&fields.named.iter().collect(), &prefix)
+            impl_fields(&fields.named.iter().collect(), &prefix, virtual_fields)
         }
         _ => unimplemented!(),
     };
@@ -286,7 +286,7 @@ fn impl_enum_variant_namend(fields: &Vec<&syn::Field>) -> (TokenStream, TokenStr
     let fields_read: Vec<_> = fields_is_dir.clone();
 
     let (fields_impl_is_dir, fields_impl_read, fields_impl_write) =
-        impl_fields(&fields, &quote! {});
+        impl_fields(&fields, &quote! {}, Vec::new());
 
     let is_dir = quote! {
         { #(#fields_is_dir),* } => {
@@ -346,6 +346,7 @@ fn parse_field(field: &&syn::Field) -> ParsedField {
 fn impl_fields(
     fields: &Vec<&Field>,
     prefix: &TokenStream,
+    virtual_fields: &Vec<VirtualField>
 ) -> (TokenStream, TokenStream, TokenStream) {
     let fields: Vec<_> = fields.iter().map(parse_field).filter(|f| !f.skip).map(|f| f.ident.clone()).collect();
     let wrapped_fields: Vec<_> = fields.iter().map(|f| quote!{ #prefix #f }).collect();

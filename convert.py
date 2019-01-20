@@ -3,6 +3,7 @@
 import ruamel.yaml as yaml
 import xmltodict
 from collections import OrderedDict
+from math import ceil
 
 def eprint(*args, **kwargs):
     import sys
@@ -26,7 +27,7 @@ yml_doc = {}
 
 stupid_names = [ "Reserved" ]
 
-def add_reg(doc, reg):
+def add_reg(doc, reg, is_bitfield):
     yml_reg = {} 
 
     name = "unknown"
@@ -67,6 +68,12 @@ def add_reg(doc, reg):
         yml_reg["min"] = min
         yml_reg["max"] = max
 
+    if not is_bitfield:
+        if "width" not in yml_reg and "max" in yml_reg:
+            yml_reg["width"] = int(ceil((yml_reg["max"]).bit_length() / 8))
+        if "width" not in yml_reg and "mask" in yml_reg:
+            yml_reg["width"] = int(ceil(int(yml_reg["mask"], 0).bit_length() / 8))
+
 
     maybe_assign(reg, "@datatype", yml_reg, "datatype")
     maybe_assign(reg, "@rw", yml_reg, "rw")
@@ -101,8 +108,9 @@ def add_reg(doc, reg):
 
     def process_desc(desc): 
         import re
-        r = re.search("(R0x[0-9a-fA-F]{4})", desc)
-        if r:
+        rs = re.finditer("(R0x[0-9a-fA-F]{4})", desc)
+        
+        for r in rs:
             r = r.group(0)
             global doc
             for reg in doc["sensor"]["registers"]["reg"]:
@@ -115,7 +123,8 @@ def add_reg(doc, reg):
                         name = name.lower()
 
                         print(desc)
-                        desc = re.sub("R0x[0-9a-fA-F]{4}(-[0-9a-fA-F])?", name, desc)
+                        # desc = re.sub("R0x[0-9a-fA-F]{4}(-[0-9a-fA-F])?", name, desc)
+                        desc = re.sub(r + "(-[0-9a-fA-F])?", name, desc, flags=re.IGNORECASE)
                         print(desc)
                         break
 
@@ -155,7 +164,7 @@ def add_reg(doc, reg):
     return name
 
 for reg in doc["sensor"]["registers"]["reg"]:
-    n = add_reg(yml_doc, reg)
+    n = add_reg(yml_doc, reg, False)
 
     bitfields = {}
 
@@ -164,7 +173,7 @@ for reg in doc["sensor"]["registers"]["reg"]:
             reg["bitfield"] = [reg["bitfield"]]
     
         for bitfield in reg["bitfield"]:
-            add_reg(bitfields, bitfield)
+            add_reg(bitfields, bitfield, True)
 
         yml_doc[n]["bitfields"] = bitfields    
 

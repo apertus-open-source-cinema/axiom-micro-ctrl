@@ -5,6 +5,7 @@ registers:
         channel:
             mode: "mmaped-gpio"
             base: 0x41200000
+            len: 4096
         map: "io.yml"
         functions: "io_functions.yml"
     sensor: 

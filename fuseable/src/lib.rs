@@ -1,18 +1,15 @@
-extern crate fuse_mt;
-extern crate itertools;
-extern crate lru;
-extern crate time;
-
 use fuse_mt::*;
 use itertools::Itertools;
 use lru::LruCache;
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::RwLock;
-use time::*;
 use std::sync::{Arc, Mutex};
+use time::*;
 
 #[derive(Debug, Clone)]
 pub enum Either<A, B> {
@@ -51,7 +48,16 @@ macro_rules! impl_fuseable_with_to_string {
                 path: &mut Iterator<Item = &str>,
                 value: Vec<u8>,
             ) -> Result<(), ()> {
-                Err(())
+                match path.next() {
+                    Some(_) => Err(()),
+                    None => {
+                        *self = String::from_utf8(value)
+                            .map_err(|_| ())?
+                            .parse()
+                            .map_err(|_| ())?;
+                        Ok(())
+                    }
+                }
             }
         }
     };
@@ -134,7 +140,10 @@ impl<TY: Fuseable> Fuseable for Option<TY> {
     }
 
     fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
-        Err(())
+        match self {
+            Some(v) => Fuseable::write(v, path, value),
+            None => Err(()),
+        }
     }
 }
 
@@ -164,7 +173,13 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
     }
 
     fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
-        Err(())
+        match path.next() {
+            Some(name) => match self.get_mut(&name.to_string()) {
+                Some(inner) => inner.write(path, value),
+                None => Err(()),
+            },
+            None => Err(()),
+        }
     }
 }
 
@@ -194,7 +209,13 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
     }
 
     fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
-        Err(())
+        match path.next() {
+            Some(name) => match self.get_mut(&name.to_string()) {
+                Some(inner) => inner.write(path, value),
+                None => Err(()),
+            },
+            None => Err(()),
+        }
     }
 }
 
@@ -220,7 +241,7 @@ impl Fuseable for CachedFuseable {
         /*
         let (mut path, path_for_string) = path.tee();
         let path_string = path_for_string.collect::<Vec<_>>().concat();
-
+        
         let mut update_cache = false;
         let is_dir = match self.is_dir_cache.write().unwrap().get(&path_string) {
             Some(r) => r.clone(),
@@ -229,11 +250,11 @@ impl Fuseable for CachedFuseable {
                 Fuseable::is_dir(self.fuseable.deref(), &mut path)
             }
         };
-
+        
         if update_cache {
             self.is_dir_cache.write().unwrap().put(path_string, is_dir);
         }
-
+        
         is_dir
         */
 
@@ -275,15 +296,27 @@ impl Fuseable for CachedFuseable {
     }
 }
 
-impl FilesystemMT for Box<Fuseable> {
+pub struct FuseableWrapper<'a> {
+    inner: RwLock<Box<Fuseable + 'a>>,
+}
+
+impl<'a> FuseableWrapper<'a> {
+    pub fn new<T: Fuseable + 'a>(f: T) -> FuseableWrapper<'a> {
+        FuseableWrapper {
+            inner: RwLock::new(Box::new(f)),
+        }
+    }
+}
+
+impl<'a> FilesystemMT for FuseableWrapper<'a> {
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         Ok(())
     }
 
-    fn destroy(&self, _req: RequestInfo) {}
+    // fn destroy(&self, _req: RequestInfo) {}
 
     fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
-        // println!("getattr: {:?}", path);
+        println!("getattr: {:?}", path);
         if let Some(fh) = fh {
             println!("getattr: unhandled open file {}", fh);
             Err(1)
@@ -291,9 +324,10 @@ impl FilesystemMT for Box<Fuseable> {
             //            fn read(&self, path: &mut Iterator<Item = String>) -> Result<Either<Vec<String>, String>, ()>;
 
             Fuseable::is_dir(
-                self.deref(),
+                (&*self.inner.read().unwrap()).deref(),
                 &mut path.to_string_lossy().split_terminator('/').skip(1),
-            ).map(|v| {
+            )
+            .map(|v| {
                 (
                     Timespec { sec: 0, nsec: 0 },
                     FileAttr {
@@ -315,15 +349,16 @@ impl FilesystemMT for Box<Fuseable> {
                         flags: 0,
                     },
                 )
-            }).map_err(|_| 0)
+            })
+            .map_err(|_| 0)
         }
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        // println!("opendir: {:?} (flags = {:#o})", path, _flags);
+        println!("opendir: {:?} (flags = {:#o})", path, _flags);
 
         match Fuseable::is_dir(
-            self.deref(),
+            (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
         ) {
             Ok(true) => Ok((0, 0)),
@@ -333,25 +368,28 @@ impl FilesystemMT for Box<Fuseable> {
     }
 
     fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
-        // println!("readdir: {:?}", path);
+        println!("readdir: {:?}", path);
         Fuseable::read(
-            self.deref(),
+            (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
-        ).map(|v| match v {
+        )
+        .map(|v| match v {
             Either::Left(fields) => fields
                 .iter()
                 .map(|f| DirectoryEntry {
                     name: OsString::from(f),
                     kind: FileType::Directory,
-                }).collect(),
+                })
+                .collect(),
             _ => unimplemented!(),
-        }).map_err(|_| 1)
+        })
+        .map_err(|_| 1)
     }
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-        // println!("open: {:?} flags={:#x}", path, flags);
+        println!("open: {:?} flags={:#x}", path, flags);
 
         match Fuseable::is_dir(
-            self.deref(),
+            (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
         ) {
             Ok(false) => Ok((0, 0)),
@@ -361,10 +399,10 @@ impl FilesystemMT for Box<Fuseable> {
     }
 
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-        // println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
+        println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
         match Fuseable::read(
-            self.deref(),
+            (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
         ) {
             Ok(Either::Left(_)) => Err(1),
@@ -373,110 +411,119 @@ impl FilesystemMT for Box<Fuseable> {
         }
     }
 
-    /*
-    fn write(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
+    fn write(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        fh: u64,
+        offset: u64,
+        data: Vec<u8>,
+        _flags: u32,
+    ) -> ResultWrite {
         println!("write: {:?} {:#x} @ {:#x}", path, data.len(), offset);
-
-        match self.resolve_path(path) {
-            Some(SensorFS::Reg(reg)) => {
-                Ok(self.write_reg(reg, data) as u32)
-            }
-
-            _ => Err(1)
-        }
+        // Ok(data.len() as u32)
+        let len = data.len();
+        Fuseable::write(
+            (&mut *self.inner.write().unwrap()).deref_mut(),
+            &mut path.to_string_lossy().split_terminator('/').skip(1),
+            data,
+        )
+        .map_err(|_| 1i32)
+        .map(|_| len as u32)
     }
 
     fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
         println!("truncate: {:?} to {:#x}", path, size);
         Ok(())
     }
-    */
 
     /*
+    
     fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
         println!("release: {:?}", path);
         Ok(())
     }
-
+    
     fn flush(&self, _req: RequestInfo, path: &Path, fh: u64, _lock_owner: u64) -> ResultEmpty {
         println!("flush: {:?}", path);
         Ok(())
     }
-
+    
     fn fsync(&self, _req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
         println!("fsync: {:?}, data={:?}", path, datasync);
         Err(1)
     }
-
+    
     fn chmod(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, mode: u32) -> ResultEmpty {
         println!("chown: {:?} to {:#o}", path, mode);
         Err(1)
     }
-
+    
     fn chown(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
         println!("chmod: {:?} to {}:{}", path, uid.unwrap_or(::std::u32::MAX), gid.unwrap_or(::std::u32::MAX));
         Err(1)
     }
-
+    
     fn utimens(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
         println!("utimens: {:?}: {:?}, {:?}", path, atime, mtime);
         Err(1)
     }
-
+    
     fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
         println!("readlink: {:?}", path);
         Err(1)
     }
-
+    
     fn statfs(&self, _req: RequestInfo, path: &Path) -> ResultStatfs {
         println!("statfs: {:?}", path);
         Err(1)
     }
-
+    
     fn fsyncdir(&self, _req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
         println!("fsyncdir: {:?} (datasync = {:?})", path, datasync);
         Err(1)
     }
-
+    
     fn mknod(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, mode: u32, rdev: u32) -> ResultEntry {
         println!("mknod: {:?}/{:?} (mode={:#o}, rdev={})", parent_path, name, mode, rdev);
         Err(1)
     }
-
+    
     fn mkdir(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, mode: u32) -> ResultEntry {
         println!("mkdir {:?}/{:?} (mode={:#o})", parent_path, name, mode);
         Err(1)
     }
-
+    
     fn unlink(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEmpty {
         println!("unlink {:?}/{:?}", parent_path, name);
         Err(1)
     }
-
+    
     fn rmdir(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEmpty {
         println!("rmdir: {:?}/{:?}", parent_path, name);
         Err(1)
     }
-
+    
     fn symlink(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, target: &Path) -> ResultEntry {
         println!("symlink: {:?}/{:?} -> {:?}", parent_path, name, target);
         Err(1)
     }
-
+    
     fn rename(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, newparent_path: &Path, newname: &OsStr) -> ResultEmpty {
         println!("rename: {:?}/{:?} -> {:?}/{:?}", parent_path, name, newparent_path, newname);
         Err(1)
     }
-
+    
     fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
         println!("link: {:?} -> {:?}/{:?}", path, newparent, newname);
         Err(1)
     }
-
+    
     fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
         println!("create: {:?}/{:?} (mode={:#o}, flags={:#x})", parent, name, mode, flags);
         Err(1)
     }
+    */
 
     /*
     fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
@@ -485,16 +532,19 @@ impl FilesystemMT for Box<Fuseable> {
     }
     */
 
+    /*
     fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
         println!("getxattr: {:?} {:?} {}", path, name, size);
         Err(1)
     }
+    */
 
+    /*
     fn setxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, value: &[u8], flags: u32, position: u32) -> ResultEmpty {
         println!("setxattr: {:?} {:?} {} bytes, flags = {:#x}, pos = {}", path, name, value.len(), flags, position);
         Err(1)
     }
-
+    
     fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
         println!("removexattr: {:?} {:?}", path, name);
         Err(1)

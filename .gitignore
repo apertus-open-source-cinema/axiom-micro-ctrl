@@ -1,4 +1,5 @@
 /target
+/parse_num/target
 /fuseable/target
 /fuseable_derive/target
 **/*.rs.bk
@@ -8,3 +9,7 @@
 perf.data
 perf.data.old
 flame.svg
+main
+main.cpp
+old_stuff
+.propfs

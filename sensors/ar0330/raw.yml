@@ -213,7 +213,7 @@ fine_integration_time:
   address: '0x3014'
   description: Fine integration is used to delay the shutter operation after the sample
     operation is finished. Thus, the integration time is decreased. The resolution
-    is 1 pixel clock time. Note that for short line length (line_length_pck, line_length_pck)
+    is 1 pixel clock time. Note that for short line length (line_length_pck, line_length_pck_cb)
     values, the available time for fine shutter is limited. If programmed for more
     than available time, the normal sensor operation will be distrupted.
   mask: '0xFFFF'
@@ -684,6 +684,7 @@ image_orientation:
   mask: '0x03'
   max: 3
   min: 0
+  width: 1
 line_length_pck:
   address: '0x300C'
   default: '0x04E0'
@@ -945,6 +946,7 @@ mode_select:
   mask: '0x01'
   max: 1
   min: 0
+  width: 1
 op_pix_clk_div:
   address: '0x3036'
   default: '0x000C'
@@ -4724,6 +4726,7 @@ revision_number:
   mask: '0xFF'
   max: 255
   min: 0
+  width: 1
 row_speed:
   address: '0x3028'
   default: '0x0010'
@@ -4811,6 +4814,7 @@ software_reset:
   mask: '0x01'
   max: 1
   min: 0
+  width: 1
 stat_frame_id:
   address: '0x31D2'
   mask: '0xFFFF'

@@ -305,7 +305,7 @@ fine_integration_time:
   address: '0x3014'
   description: Fine integration is used to delay the shutter operation after the sample
     operation is finished. Thus, the integration time is decreased. The resolution
-    is 1 pixel clock time. Note that for short line length (line_length_pck, line_length_pck)
+    is 1 pixel clock time. Note that for short line length (line_length_pck, line_length_pck_cb)
     values, the available time for fine shutter is limited. If programmed for more
     than available time, the normal sensor operation will be distrupted.
   max: 65535

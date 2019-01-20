@@ -2,22 +2,28 @@
 name = "ctrl"
 version = "0.1.0"
 authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
+edition = "2018"
 
 [dependencies]
+parse_num = { path = "parse_num" }
 fuseable = { path = "fuseable" }
 fuseable_derive = { path = "fuseable_derive" }
 fuse_mt = "*"
-serde = { version = "*", features = ["rc"] }
+serde = { version = "1.0.85", features = ["rc"] }
+serde_derive = "1.0.85"
 # serde_state = { version = "*", path = "serde_state/serde_state" }
-serde_derive = "*"
-serde_derive_state = { version = "*", path = "serde_state/serde_derive" }
-serde_yaml = { version = "*", path = "serde_yaml" }
+# serde_derive_state = { version = "*", path = "serde_state/serde_derive" }
+serde_yaml = "*"
 num = "*"
 itertools = "*"
 structopt = "*"
 lazy_static = "*"
 i2c-linux = "*"
+nom = "*"
 isomorphism = { version = "*", features = ["serde"] }
+i2cdev = "*"
+derivative = "*"
+memmap = "*"
 
 [profile.release]
 lto = true

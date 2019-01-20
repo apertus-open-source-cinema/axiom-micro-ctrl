@@ -1,4 +1,6 @@
 reset:
     address: '0x0'
+    width: 4
 delay:
     address: '0x4'
+    witdh: 4

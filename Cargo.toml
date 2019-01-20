@@ -11,8 +11,6 @@ fuseable_derive = { path = "fuseable_derive" }
 fuse_mt = "*"
 serde = { version = "1.0.85", features = ["rc"] }
 serde_derive = "1.0.85"
-# serde_state = { version = "*", path = "serde_state/serde_state" }
-# serde_derive_state = { version = "*", path = "serde_state/serde_derive" }
 serde_yaml = "*"
 num = "*"
 itertools = "*"

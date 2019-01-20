@@ -5,25 +5,25 @@ authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
 edition = "2018"
 
 [dependencies]
-parse_num = { path = "parse_num" }
+derivative = "*"
+fuse_mt = "*"
 fuseable = { path = "fuseable" }
 fuseable_derive = { path = "fuseable_derive" }
-fuse_mt = "*"
+i2c-linux = "*"
+i2cdev = "*"
+isomorphism = { version = "*", features = ["serde"] }
+itertools = "*"
+lazy_static = "*"
+memmap = "*"
+nom = "*"
+num = "*"
+parse_num = { path = "parse_num" }
 serde = { version = "1.0.85", features = ["rc"] }
 serde_derive = "1.0.85"
 serde_yaml = "*"
-num = "*"
-itertools = "*"
 structopt = "*"
-lazy_static = "*"
-i2c-linux = "*"
-nom = "*"
-isomorphism = { version = "*", features = ["serde"] }
-i2cdev = "*"
-derivative = "*"
-memmap = "*"
 
 [profile.release]
-lto = true
 codegen-units = 16
+lto = true
 panic = 'abort'

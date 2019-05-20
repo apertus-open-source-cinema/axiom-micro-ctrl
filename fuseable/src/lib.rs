@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use time::*;
@@ -76,6 +77,49 @@ impl_fuseable_with_to_string!(i64);
 impl_fuseable_with_to_string!(f32);
 impl_fuseable_with_to_string!(f64);
 
+impl<T: Fuseable> Fuseable for Vec<T> {
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        match path.next() {
+            Some(idx) => match idx.parse::<usize>() {
+                Ok(idx) => match self.get(idx) {
+                    Some(v) => Fuseable::is_dir(v, path),
+                    None => Err(()),
+                },
+                Err(_) => Err(()),
+            },
+            None => Ok(true),
+        }
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        match path.next() {
+            Some(idx) => match idx.parse::<usize>() {
+                Ok(idx) => match self.get(idx) {
+                    Some(v) => Fuseable::read(v, path),
+                    None => Err(()),
+                },
+                Err(_) => Err(()),
+            },
+            None => Ok(Either::Left(
+                (0..(self.len() - 1)).map(|v| v.to_string()).collect(),
+            )),
+        }
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        match path.next() {
+            Some(idx) => match idx.parse::<usize>() {
+                Ok(idx) => match self.get_mut(idx) {
+                    Some(v) => Fuseable::write(v, path, value),
+                    None => Err(()),
+                },
+                Err(_) => Err(()),
+            },
+            None => Err(()),
+        }
+    }
+}
+
 impl<T: Fuseable> Fuseable for Arc<Mutex<T>> {
     fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
         self.lock().unwrap().is_dir(path)
@@ -87,6 +131,20 @@ impl<T: Fuseable> Fuseable for Arc<Mutex<T>> {
 
     fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         self.lock().unwrap().write(path, value)
+    }
+}
+
+impl<T: Fuseable + ?Sized> Fuseable for Box<T> {
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        Deref::deref(self).is_dir(path)
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        Deref::deref(self).read(path)
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        DerefMut::deref_mut(self).write(path, value)
     }
 }
 
@@ -183,6 +241,95 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
     }
 }
 
+impl<'a, VT: Fuseable, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone> Fuseable
+    for HashMap<KT, VT>
+{
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        match path.next() {
+            Some(name) => match self.get(&name.parse().map_err(|_| ())?) {
+                Some(inner) => inner.is_dir(path),
+                None => Err(()),
+            },
+            None => Ok(true),
+        }
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        match path.next() {
+            Some(name) => match self.get(&name.parse().map_err(|_| ())?) {
+                Some(inner) => inner.read(path),
+                None => Err(()),
+            },
+            None => {
+                let keys: Vec<_> = self.keys().cloned().map(|k| k.to_string()).collect();
+                Ok(Either::Left(keys))
+            }
+        }
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        match path.next() {
+            Some(name) => match self.get_mut(&name.parse().map_err(|_| ())?) {
+                Some(inner) => inner.write(path, value),
+                None => Err(()),
+            },
+            None => Err(()),
+        }
+    }
+}
+
+#[cfg(feature = "bimap")]
+use isomorphism::BiMap;
+
+#[cfg(feature = "bimap")]
+impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone>
+    Fuseable for BiMap<KT, VT>
+{
+    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+        match path.next() {
+            Some(name) => match self.get_left(&name.parse().map_err(|_| ())?) {
+                Some(inner) => inner.is_dir(path),
+                None => Err(()),
+            },
+            None => Ok(true),
+        }
+    }
+
+    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+        match path.next() {
+            Some(name) => match self.get_left(&name.parse().map_err(|_| ())?) {
+                Some(inner) => inner.read(path),
+                None => Err(()),
+            },
+            None => {
+                let keys: Vec<_> = self
+                    .iter()
+                    .map(|(k, v)| k)
+                    .cloned()
+                    .map(|k| k.to_string())
+                    .collect();
+                // let keys = keys.into_iter().map(|k| String::from(k)).collect();
+                Ok(Either::Left(keys))
+            }
+        }
+    }
+
+    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+        match path.next() {
+            Some(name) => {
+                let parsed_name = name.parse().map_err(|_| ())?;
+                let mut right = self.remove_left(&parsed_name).ok_or(())?;
+                let ret = Fuseable::write(&mut right, path, value);
+                self.insert(parsed_name, right);
+
+                ret
+            }
+            None => Err(()),
+        }
+    }
+}
+
+/*
 impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
     fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
@@ -218,11 +365,12 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
         }
     }
 }
+*/
 
 // The idea behind this is, that dir entries are always static, but file contents are not
 pub struct CachedFuseable {
-    is_dir_cache: RwLock<LruCache<String, Result<bool, ()>>>,
-    read_dir_cache: RwLock<LruCache<String, Result<Either<Vec<String>, String>, ()>>>,
+    is_dir_cache: RwLock<LruCache<u64, Result<bool, ()>>>,
+    read_dir_cache: RwLock<LruCache<u64, Result<Either<Vec<String>, String>, ()>>>,
     fuseable: Box<Fuseable>,
 }
 
@@ -236,37 +384,48 @@ impl CachedFuseable {
     }
 }
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+fn calculate_hash<T: Hash>(t: &mut Iterator<Item = T>) -> u64 {
+    let mut s = DefaultHasher::new();
+    for i in t {
+        i.hash(&mut s);
+    }
+    s.finish()
+}
+
 impl Fuseable for CachedFuseable {
     fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
-        /*
-        let (mut path, path_for_string) = path.tee();
-        let path_string = path_for_string.collect::<Vec<_>>().concat();
-        
+        let (mut path, mut path_for_hash) = path.tee();
+        let hash = calculate_hash(&mut path_for_hash);
+
         let mut update_cache = false;
-        let is_dir = match self.is_dir_cache.write().unwrap().get(&path_string) {
+        let is_dir = match self.is_dir_cache.write().unwrap().get(&hash) {
             Some(r) => r.clone(),
             None => {
                 update_cache = true;
                 Fuseable::is_dir(self.fuseable.deref(), &mut path)
             }
         };
-        
-        if update_cache {
-            self.is_dir_cache.write().unwrap().put(path_string, is_dir);
-        }
-        
-        is_dir
-        */
 
-        Fuseable::is_dir(self.fuseable.deref(), path)
+        if update_cache {
+            self.is_dir_cache.write().unwrap().put(hash, is_dir);
+        }
+
+        is_dir
+
+        // Fuseable::is_dir(self.fuseable.deref(), path)
     }
 
     fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
-        let (mut path, path_for_string) = path.tee();
-        let path_string = path_for_string.collect::<Vec<_>>().concat();
+        let (mut path, mut path_for_hash) = path.tee();
+        let hash = calculate_hash(&mut path_for_hash);
+
+        // let path_string = path_for_string.collect::<Vec<_>>().concat();
 
         let mut update_cache = false;
-        let read = match self.read_dir_cache.write().unwrap().get(&path_string) {
+        let read = match self.read_dir_cache.write().unwrap().get(&hash) {
             Some(r) => r.clone(),
             None => {
                 update_cache = true;
@@ -277,10 +436,7 @@ impl Fuseable for CachedFuseable {
         if update_cache {
             match read {
                 Ok(Either::Left(_)) => {
-                    self.read_dir_cache
-                        .write()
-                        .unwrap()
-                        .put(path_string, read.clone());
+                    self.read_dir_cache.write().unwrap().put(hash, read.clone());
                 }
                 _ => {}
             }
@@ -298,12 +454,18 @@ impl Fuseable for CachedFuseable {
 
 pub struct FuseableWrapper<'a> {
     inner: RwLock<Box<Fuseable + 'a>>,
+    //    getattr_cache: RwLock<LruCache<String, Result<bool, ()>>>,
+    //    readdir_cache: RwLock<LruCache<String, Result<Either<Vec<String>, String>, ()>>>,
 }
 
 impl<'a> FuseableWrapper<'a> {
     pub fn new<T: Fuseable + 'a>(f: T) -> FuseableWrapper<'a> {
         FuseableWrapper {
             inner: RwLock::new(Box::new(f)),
+            /*
+            getattr_cache: RwLock::new(LruCache::new(65535)),
+            readdir_cache: RwLock::new(LruCache::new(65535)),
+            */
         }
     }
 }
@@ -316,9 +478,9 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
     // fn destroy(&self, _req: RequestInfo) {}
 
     fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
-        println!("getattr: {:?}", path);
+        //        println!("getattr: {:?}", path);
         if let Some(fh) = fh {
-            println!("getattr: unhandled open file {}", fh);
+            //            println!("getattr: unhandled open file {}", fh);
             Err(1)
         } else {
             //            fn read(&self, path: &mut Iterator<Item = String>) -> Result<Either<Vec<String>, String>, ()>;
@@ -329,7 +491,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
             )
             .map(|v| {
                 (
-                    Timespec { sec: 0, nsec: 0 },
+                    Timespec { sec: -1, nsec: 0 },
                     FileAttr {
                         size: 4096, // TODO(robin): this is shitty, but needed to convince the vfs to actually use the results of a read
                         blocks: 0,
@@ -355,7 +517,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        println!("opendir: {:?} (flags = {:#o})", path, _flags);
+        //        println!("opendir: {:?} (flags = {:#o})", path, _flags);
 
         match Fuseable::is_dir(
             (&*self.inner.read().unwrap()).deref(),
@@ -368,7 +530,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
     }
 
     fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
-        println!("readdir: {:?}", path);
+        //        println!("readdir: {:?}", path);
         Fuseable::read(
             (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
@@ -386,7 +548,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         .map_err(|_| 1)
     }
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-        println!("open: {:?} flags={:#x}", path, flags);
+        //        println!("open: {:?} flags={:#x}", path, flags);
 
         match Fuseable::is_dir(
             (&*self.inner.read().unwrap()).deref(),
@@ -399,7 +561,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
     }
 
     fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-        println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
+        //        println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
         match Fuseable::read(
             (&*self.inner.read().unwrap()).deref(),
@@ -420,7 +582,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         data: Vec<u8>,
         _flags: u32,
     ) -> ResultWrite {
-        println!("write: {:?} {:#x} @ {:#x}", path, data.len(), offset);
+        //        println!("write: {:?} {:#x} @ {:#x}", path, data.len(), offset);
         // Ok(data.len() as u32)
         let len = data.len();
         Fuseable::write(
@@ -433,92 +595,92 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
     }
 
     fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
-        println!("truncate: {:?} to {:#x}", path, size);
+        //        println!("truncate: {:?} to {:#x}", path, size);
         Ok(())
     }
 
     /*
-    
+
     fn release(&self, _req: RequestInfo, path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
         println!("release: {:?}", path);
         Ok(())
     }
-    
+
     fn flush(&self, _req: RequestInfo, path: &Path, fh: u64, _lock_owner: u64) -> ResultEmpty {
         println!("flush: {:?}", path);
         Ok(())
     }
-    
+
     fn fsync(&self, _req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
         println!("fsync: {:?}, data={:?}", path, datasync);
         Err(1)
     }
-    
+
     fn chmod(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, mode: u32) -> ResultEmpty {
         println!("chown: {:?} to {:#o}", path, mode);
         Err(1)
     }
-    
+
     fn chown(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
         println!("chmod: {:?} to {}:{}", path, uid.unwrap_or(::std::u32::MAX), gid.unwrap_or(::std::u32::MAX));
         Err(1)
     }
-    
+
     fn utimens(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
         println!("utimens: {:?}: {:?}, {:?}", path, atime, mtime);
         Err(1)
     }
-    
+
     fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
         println!("readlink: {:?}", path);
         Err(1)
     }
-    
+
     fn statfs(&self, _req: RequestInfo, path: &Path) -> ResultStatfs {
         println!("statfs: {:?}", path);
         Err(1)
     }
-    
+
     fn fsyncdir(&self, _req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
         println!("fsyncdir: {:?} (datasync = {:?})", path, datasync);
         Err(1)
     }
-    
+
     fn mknod(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, mode: u32, rdev: u32) -> ResultEntry {
         println!("mknod: {:?}/{:?} (mode={:#o}, rdev={})", parent_path, name, mode, rdev);
         Err(1)
     }
-    
+
     fn mkdir(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, mode: u32) -> ResultEntry {
         println!("mkdir {:?}/{:?} (mode={:#o})", parent_path, name, mode);
         Err(1)
     }
-    
+
     fn unlink(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEmpty {
         println!("unlink {:?}/{:?}", parent_path, name);
         Err(1)
     }
-    
+
     fn rmdir(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr) -> ResultEmpty {
         println!("rmdir: {:?}/{:?}", parent_path, name);
         Err(1)
     }
-    
+
     fn symlink(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, target: &Path) -> ResultEntry {
         println!("symlink: {:?}/{:?} -> {:?}", parent_path, name, target);
         Err(1)
     }
-    
+
     fn rename(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, newparent_path: &Path, newname: &OsStr) -> ResultEmpty {
         println!("rename: {:?}/{:?} -> {:?}/{:?}", parent_path, name, newparent_path, newname);
         Err(1)
     }
-    
+
     fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
         println!("link: {:?} -> {:?}/{:?}", path, newparent, newname);
         Err(1)
     }
-    
+
     fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
         println!("create: {:?}/{:?} (mode={:#o}, flags={:#x})", parent, name, mode, flags);
         Err(1)
@@ -544,7 +706,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         println!("setxattr: {:?} {:?} {} bytes, flags = {:#x}, pos = {}", path, name, value.len(), flags, position);
         Err(1)
     }
-    
+
     fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
         println!("removexattr: {:?} {:?}", path, name);
         Err(1)

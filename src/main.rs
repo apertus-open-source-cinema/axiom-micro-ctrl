@@ -1,6 +1,8 @@
+#![feature(inner_deref)]
+
 use crate::sensor::Sensor;
 use crate::serde_util::file_opener;
-use fuseable::FuseableWrapper;
+use fuseable::{FuseableWrapper, Fuseable, CachedFuseable};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
@@ -20,6 +22,9 @@ struct Opt {
     /// Config file describing the camera components and their functionality
     #[structopt(name = "FILE")]
     file: String,
+    /// Set all communication channels to mock mode to prevent them from actually doing anything
+    #[structopt(short = "m", long = "mock")]
+    mock: bool,
 }
 
 fn main() {
@@ -32,8 +37,18 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    let sensor: Sensor = serde_yaml::from_str(&contents).unwrap();
-    println!("{:#?}", sensor);
+    let mut sensor: Sensor = serde_yaml::from_str(&contents).unwrap();
+    sensor.mocked(opt.mock);
+
+
+
+    // println!("{:#?}", sensor);
+
+    /*
+    let boxed_sensor: Box<Fuseable> = Box::new(sensor);
+    let cached_sensor = CachedFuseable::new(boxed_sensor, 65535);
+    let sensor: Box<Fuseable> = Box::new(cached_sensor);
+    */
 
     let s = FuseableWrapper::new(sensor);
     // let s = CachedFuseable::new(s, 65536);

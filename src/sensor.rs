@@ -1,3 +1,4 @@
+use crate::address::Address;
 use crate::communication_channel::CommunicationChannel;
 use crate::serde_util::{bool_false, by_path};
 use crate::valuemap::*;
@@ -33,11 +34,11 @@ enum Description {
     write = "self.write_value",
     is_dir = "false"
 ))]
-struct Register {
+pub struct Register {
     #[fuseable(ro)]
-    address: String,
+    pub address: String,
     #[fuseable(ro)]
-    width: Option<u8>,
+    pub width: Option<u8>,
     #[fuseable(ro)]
     mask: Option<String>,
     #[fuseable(ro)]
@@ -110,6 +111,17 @@ where
     }
 }
 
+fn to_hex(v: Vec<u8>) -> String {
+    if v.len() > 0 {
+        "0x".to_string()
+            + &v.iter()
+                .map(|v| format!("{:02X}", v).to_string())
+                .collect::<String>()
+    } else {
+        "".to_string()
+    }
+}
+
 impl Register {
     fn read_value(
         &self,
@@ -122,14 +134,9 @@ impl Register {
                 let comm_channel = comm_channel.lock().unwrap();
 
                 if let Some(width) = self.width {
-                    comm_channel.read(&self.address, width as usize).map(|v| {
-                        Either::Right(
-                            "0x".to_string()
-                                + &v.iter()
-                                    .map(|v| format!("{:X}", v).to_string())
-                                    .collect::<String>(),
-                        )
-                    })
+                    comm_channel
+                        .read_value(&Address::parse(&self.address, width as usize)?)
+                        .map(|v| Either::Right(to_hex(v)))
                 } else {
                     Err(())
                 }
@@ -161,6 +168,14 @@ impl Register {
                             // opposite is the case (note this applies only if a mask is specified,
                             // maybe we only want to allow masks, when their width matches the
                             // expected width
+
+                            // TODO(robin): this also needs to account for little endian vs big endian
+                            // for value 0x12345678 at 0x0,
+                            // little endian has 0x78 is stored at 0x0, 0x56 is stored at 0x1 and so on
+                            // big endian has 0x12 stored at 0x0, 0x34 stored at 0x1 and so on
+                            // need to define internal byte order =>
+                            // little endian -- not so intuitive
+                            // big endian -- would be more efficient and more intuitive
                             while mask.len() < width as usize {
                                 mask.push(0);
                             }
@@ -169,7 +184,8 @@ impl Register {
                                 value.push(0);
                             }
 
-                            let current_value = comm_channel.read(&self.address, width as usize)?;
+                            let current_value = comm_channel
+                                .read_value(&Address::parse(&self.address, width as usize)?)?;
 
                             izip!(mask, value, current_value)
                                 .map(|(m, val, cur)| (val & m) | (cur & !m))
@@ -178,7 +194,7 @@ impl Register {
                         None => value,
                     };
 
-                    comm_channel.write(&self.address, value)
+                    comm_channel.write_value(&Address::parse(&self.address, width as usize)?, value)
                 } else {
                     Err(())
                 }
@@ -195,10 +211,9 @@ struct RegisterSet {
 
 #[derive(Debug, Fuseable)]
 struct RegisterSetting {
-    #[fuseable(skip)]
-    channel: Arc<Mutex<CommunicationChannel>>,
-    map: RegisterSet,
     #[fuseable(ro)]
+    channel: Arc<Mutex<CommunicationChannel>>,
+    map: Arc<Mutex<RegisterSet>>,
     functions: HashMap<String, Function>,
 }
 
@@ -207,7 +222,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Debug, Serialize, Deserialize)]
+        #[derive(Debug, Deserialize)]
         struct RegisterSettingConfig {
             channel: CommunicationChannel,
             #[serde(deserialize_with = "by_path")]
@@ -216,9 +231,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
             functions: HashMap<String, Function>,
         }
 
-        //        println!("deserializing setting config");
         let settings = RegisterSettingConfig::deserialize(deserializer)?;
-        //        println!("didi the shit {:#?}", settings);
         let channel = Arc::new(Mutex::new(settings.channel));
 
         let registers = settings
@@ -235,12 +248,29 @@ impl<'de> Deserialize<'de> for RegisterSetting {
                 )
             })
             .collect();
+
         let map = RegisterSet { registers };
+        let map = Arc::new(Mutex::new(map));
+
+        let functions = settings
+            .functions
+            .into_iter()
+            .map(|(name, func)| {
+                (
+                    name,
+                    Function {
+                        channel: Some(channel.clone()),
+                        regs: Some(map.clone()),
+                        ..func
+                    },
+                )
+            })
+            .collect();
 
         Ok(RegisterSetting {
             channel,
             map,
-            functions: settings.functions,
+            functions,
         })
     }
 }
@@ -257,7 +287,7 @@ struct Function {
     addr: String,
     #[fuseable(ro)]
     desc: Option<Description>,
-    #[fuseable(skip)]
+    //    #[fuseable(skip)]
     #[serde(default, deserialize_with = "deser_valuemap")]
     map: Option<ValueMap>,
     #[serde(default = "bool_false")]
@@ -265,6 +295,12 @@ struct Function {
     writable: bool,
     #[fuseable(ro)]
     default: Option<u64>,
+    #[serde(skip)]
+    #[fuseable(ro)]
+    channel: Option<Arc<Mutex<CommunicationChannel>>>,
+    #[serde(skip)]
+    #[fuseable(ro)]
+    regs: Option<Arc<Mutex<RegisterSet>>>,
 }
 
 impl Function {
@@ -272,13 +308,53 @@ impl Function {
         &self,
         path: &mut Iterator<Item = &str>,
     ) -> Result<Either<Vec<String>, String>, ()> {
-        println!("reading of {}", self.addr);
-        Err(())
+        match path.next() {
+            Some(_) => Err(()),
+            None => {
+                let addr = Address::parse_named(
+                    &self.addr,
+                    &self.regs.deref().ok_or(())?.lock().map_err(|_| ())?.registers,
+                )?;
+
+                let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
+                let value = channel.read_value(&addr)?;
+
+                match &self.map {
+                    Some(map) => map.lookup(value).map(|v| Either::Right(v)),
+                    None => Ok(Either::Right(to_hex(value))),
+                }
+            }
+        }
     }
 
-    fn write_value(&self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
-        println!("writing to {}", self.addr);
-        Err(())
+    fn write_value(
+        &self,
+        path: &mut Iterator<Item = &str>,
+        value: Vec<u8>
+    ) -> Result<(), ()> {
+
+
+        match path.next() {
+            Some(_) => Err(()),
+            None => {
+
+                let addr = Address::parse_named(
+                    &self.addr,
+                    &self.regs.deref().ok_or(())?.lock().map_err(|_| ())?.registers,
+                )?;
+
+                let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
+
+                let value = match &self.map {
+                    Some(map) => map.encode(String::from_utf8(value).map_err(|_| ())?)?,
+                    None => value,
+                };
+
+                println!("encoded value: {:?}", value);
+
+                channel.write_value(&addr, value)
+            }
+        }
     }
 }
 
@@ -287,4 +363,12 @@ pub struct Sensor {
     #[fuseable(ro)]
     model: String,
     registers: HashMap<String, RegisterSetting>,
+}
+
+impl Sensor {
+    pub fn mocked(&mut self, mock: bool) {
+        for rs in self.registers.values_mut() {
+            rs.channel.lock().unwrap().mock_mode(mock);
+        }
+    }
 }

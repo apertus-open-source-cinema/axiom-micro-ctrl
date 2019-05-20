@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 derivative = "*"
 fuse_mt = "*"
-fuseable = { path = "fuseable" }
+fuseable = { path = "fuseable", features = ["bimap"] }
 fuseable_derive = { path = "fuseable_derive" }
 i2c-linux = "*"
 i2cdev = "*"
@@ -22,6 +22,8 @@ serde = { version = "1.0.85", features = ["rc"] }
 serde_derive = "1.0.85"
 serde_yaml = "*"
 structopt = "*"
+paste = "*"
+byteorder = "*"
 
 [profile.release]
 codegen-units = 16

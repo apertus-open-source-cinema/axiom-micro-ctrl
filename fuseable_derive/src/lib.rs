@@ -37,6 +37,8 @@ fn impl_fuseable(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
+    // println!("{}", ret);
+
     ret
 }
 
@@ -87,7 +89,7 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
     fn lit_to_expr_path(lit: &syn::Lit) -> syn::ExprPath {
         let string = lit_to_direct_string(lit);
         let tokens = syn::parse_str(&string).unwrap();
-    
+
         syn::parse2(tokens).unwrap()
     }
     */
@@ -187,7 +189,9 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
 
             impl_enum(&ast.ident, data)
         }
-        _ => unimplemented!(),
+        _ => {
+            unimplemented!()
+        }
     }
 }
 
@@ -290,6 +294,7 @@ fn impl_enum_variant(variant: &syn::Variant) -> (TokenStream, TokenStream, Token
                 impl_enum_variant_flatten(&field, true)
             }
         }
+        syn::Fields::Unit => impl_enum_variant_unit(&name),
         _ => unimplemented!(),
     };
 
@@ -303,6 +308,34 @@ fn impl_enum_variant(variant: &syn::Variant) -> (TokenStream, TokenStream, Token
 
     let write = quote! {
         #name #write
+    };
+
+    (is_dir, read, write)
+}
+
+fn impl_enum_variant_unit(name: &syn::Ident) -> (TokenStream, TokenStream, TokenStream) {
+    let is_dir = quote! {
+        => {
+            match path.next() {
+                Some(_) => Err(()),
+                None => Ok(false)
+            }
+        }
+    };
+
+    let read = quote! {
+        => {
+            match path.next() {
+                Some(_) => Err(()),
+                None => Ok(stringify!(#name).to_owned())
+            }
+        }
+    };
+
+    let write = quote! {
+        => {
+            Err(())
+        }
     };
 
     (is_dir, read, write)
@@ -368,7 +401,7 @@ fn impl_enum_variant_namend(fields: &Vec<&syn::Field>) -> (TokenStream, TokenStr
     let fields_write: Vec<_> = fields_is_dir.clone();
 
     let (fields_impl_is_dir, fields_impl_read, fields_impl_write) =
-        impl_fields(&fields, &quote!{}, &quote!{}, &Vec::new());
+        impl_fields(&fields, &quote! {}, &quote! {}, &Vec::new());
 
     let is_dir = quote! {
         { #(#fields_is_dir),* } => {
@@ -469,15 +502,15 @@ fn impl_fields(
 
     let wrapped_fields_read: Vec<_> = fields_read
         .iter()
-        .map(|f| quote!{ #prefix_read #f })
+        .map(|f| quote! { #prefix_read #f })
         .collect();
     let wrapped_fields_is_dir: Vec<_> = fields_is_dir
         .iter()
-        .map(|f| quote!{ #prefix_read #f })
+        .map(|f| quote! { #prefix_read #f })
         .collect();
     let wrapped_fields_write: Vec<_> = fields_write
         .iter()
-        .map(|f| quote!{ #prefix_write #f })
+        .map(|f| quote! { #prefix_write #f })
         .collect();
 
     let mut all_fields = fields_read.clone();

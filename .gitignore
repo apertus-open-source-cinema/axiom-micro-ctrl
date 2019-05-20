@@ -13,3 +13,4 @@ main
 main.cpp
 old_stuff
 .propfs
+.cargo

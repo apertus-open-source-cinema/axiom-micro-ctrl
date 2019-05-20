@@ -49,3 +49,7 @@ where
 pub fn bool_false() -> bool {
     false
 }
+
+pub fn bool_true() -> bool {
+    false
+}

@@ -1,16 +1,40 @@
 use num::Num;
 use std::iter::FromIterator;
 use std::string::String;
-// std::cmp::PartialEq
+use std::collections::HashMap;
+use crate::sensor::Register;
 
 #[derive(Debug, PartialEq)]
 pub struct Address {
     pub base: Vec<u8>,
     pub slice: (u8, u8),
-    pub size: usize,
+//    pub size: usize,
 }
 
+
 impl Address {
+    pub fn parse_named(address: &String, regs: &HashMap<String, Register>) -> Result<Address, ()> {
+        let mut split = address.split('[');
+        match split.next() {
+            Some(name) => {
+                match regs.get(name) {
+                    Some(reg) => {
+                        match split.next() {
+                            Some(idx_part) => {
+                                Address::parse(&(reg.address.clone() + "[" + idx_part), reg.width.ok_or(())? as usize)
+                            }
+                            None => {
+                                Address::parse(&reg.address, reg.width.ok_or(())? as usize)
+                            }
+                        }
+                    }
+                    None => Err(())
+                }
+            }
+            None => Err(())
+        }
+    }
+
     pub fn parse(address: &String, amount: usize) -> Result<Address, ()> {
         let address: Vec<char> = address.chars().filter(|c| !c.is_whitespace()).collect();
 
@@ -138,10 +162,13 @@ impl Address {
             }
         }
 
+        // println!("amount: {}, slice_end: {}, slice_end >> 3: {}", amount, slice_end, slice_end >> 3);
+        assert!(amount >= ((slice_end - slice_start) >> 3) as usize);
+
         Ok(Address {
             base,
             slice: (slice_start, slice_end),
-            size: amount,
+//            size: amount,
         })
     }
 
@@ -153,6 +180,8 @@ impl Address {
     */
 
     // TODO(robin): this could suffer from endianess fuckup
+    // TODO(robin): to fix this use byteorder crate and specify the byteorder of base
+    // byteorder of base should be big endian to match all the other stuff
     pub fn as_u64(&self) -> u64 {
         assert!(self.base.len() < 9, "base should be no longer than 8 bytes");
 
@@ -164,6 +193,14 @@ impl Address {
         }
 
         base
+    }
+
+    pub fn bytes(&self) -> usize {
+        let bits = self.slice.1 - self.slice.0;
+        let extra_byte = if bits % 8 > 0 { 1 } else { 0 };
+
+
+        (extra_byte + bits >> 3) as usize
     }
 }
 

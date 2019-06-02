@@ -11,14 +11,14 @@ use serde_derive::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::sync::RwLock;
 
-pub type CommunicationChannel = Box<CommChannel>;
+pub type CommunicationChannel = Box<dyn CommChannel>;
 
 pub trait CommChannel: Debug + Fuseable {
     fn read_value_real(&self, address: &Address) -> Result<Vec<u8>, ()>;
     fn write_value_real(&self, address: &Address, value: Vec<u8>) -> Result<(), ()>;
 
     fn read_value_mock(&self, address: &Address) -> Result<Vec<u8>, ()> {
-        println!("MOCK READ {:?} bits at {:?} by {:?}", address.slice.1 - address.slice.1, address, self);
+        println!("MOCK READ {:?} bits at {:?} by {:?}", address.slice_end - address.slice_start, address, self);
         Ok(vec![])
     }
 
@@ -77,7 +77,7 @@ struct MMAPGPIO {
 
 impl I2CCdev {
     fn init(&self) -> Result<LinuxI2CDevice, ()> {
-        LinuxI2CDevice::new(format!("/dev/i2c-{}", self.bus), self.address as u16).map_err(|_| ())
+        LinuxI2CDevice::new(format!("/dev/i2c-{}", self.bus), u16::from(self.address)).map_err(|_| ())
     }
 }
 
@@ -115,11 +115,14 @@ impl CommChannel for I2CCdev {
     }
 
     fn write_value_real(&self, address: &Address, value: Vec<u8>) -> Result<(), ()> {
+        let mut tmp = Vec::new();
+        tmp.extend(&address.base);
+        tmp.extend(value);
+        
         with_dev(
             &self.dev,
             |i2c_dev| {
-                i2c_dev.write(&address.base).map_err(|_| ())?;
-                i2c_dev.write(&value).map_err(|_| ())
+                i2c_dev.write(&tmp).map_err(|_| ())
             },
             || self.init(),
         )
@@ -156,10 +159,8 @@ impl CommChannel for MMAPGPIO {
         with_dev(
             &self.dev,
             |mmap_dev| {
-                let mut i = 0;
-                for byte in value {
-                    mmap_dev[offset + i] = byte;
-                    i += 1;
+                for (i, byte) in value.iter().enumerate() {
+                    mmap_dev[offset + i] = *byte;
                 }
                 Ok(())
             },
@@ -213,7 +214,7 @@ macro_rules! comm_channel_config {
             }
 
             impl CommChannelConfig {
-                fn to_comm_channel(self) -> Box<CommChannel> {
+                fn convert_to_comm_channel(self) -> Box<dyn CommChannel> {
                     match self {
                         $(
                             CommChannelConfig::[<$struct Channel___>] { channel } => { Box::new(channel) },
@@ -227,12 +228,12 @@ macro_rules! comm_channel_config {
 
 comm_channel_config!(I2CCdev => "i2c-cdev", MMAPGPIO => "mmaped-gpio");
 
-impl<'de> Deserialize<'de> for Box<CommChannel> {
+impl<'de> Deserialize<'de> for Box<dyn CommChannel> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let config = CommChannelConfig::deserialize(deserializer)?;
-        Ok(config.to_comm_channel())
+        Ok(config.convert_to_comm_channel())
     }
 }

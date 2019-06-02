@@ -1,9 +1,8 @@
 use fuseable::{Either, Fuseable};
 use fuseable_derive::Fuseable;
 use isomorphism::BiMap;
-use num::Num;
 use parse_num::{parse_num, parse_num_padded, ParseError};
-use serde::{de::Error, *};
+use serde::*;
 use serde_derive::*;
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -12,7 +11,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::io::Cursor;
 
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
-enum Value {
+pub enum Value {
     Value(Vec<u8>),
     Any,
 }
@@ -39,7 +38,7 @@ impl FromStr for Value {
             "Any" | "any" => Ok(Value::Any),
             _ => {
                 println!("got {}", s);
-                let v = parse_num_padded(s).map(|v| Value::Value(v));
+                let v = parse_num_padded(s).map(Value::Value);
                 println!("parsed {:?}", v);
                 v
             }
@@ -100,7 +99,7 @@ impl ValueMap {
                 let v = map.get_right(&s).ok_or(())?;
                 match v {
                     Value::Value(v) => Ok(v.clone()),
-                    Any => {
+                    _ => {
                         let mut potential_value = vec![0u8];
                         loop {
                             match potential_value.last().unwrap() {
@@ -115,9 +114,8 @@ impl ValueMap {
                                 }
                             }
 
-                            match map.get_left(&Value::Value(potential_value.clone())) {
-                                None => break,
-                                _ => {}
+                            if map.get_left(&Value::Value(potential_value.clone())).is_none() {
+                                break
                             }
                         }
 
@@ -128,7 +126,7 @@ impl ValueMap {
             ValueMap::Floating(map) => {
                 let wanted_value: f64 = s.parse().map_err(|_| ())?;
 
-                let (v, _) = map.iter().min_by(|(k1, v1), (k2, v2)| {
+                let (v, _) = map.iter().min_by(|(_, v1), (_, v2)| {
                     if (wanted_value - **v1).abs() < (wanted_value - **v2).abs() {
                         Ordering::Less
                     } else {
@@ -138,7 +136,7 @@ impl ValueMap {
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),
-                    Any => {
+                    _ => {
                         let mut potential_value = vec![0u8];
                         loop {
                             match potential_value.last().unwrap() {
@@ -153,9 +151,8 @@ impl ValueMap {
                                 }
                             }
 
-                            match map.get(&Value::Value(potential_value.clone())) {
-                                None => break,
-                                _ => {}
+                            if map.get(&Value::Value(potential_value.clone())).is_none() {
+                                break
                             }
                         }
 
@@ -167,13 +164,13 @@ impl ValueMap {
                 let wanted_value: u64 = Cursor::new(parse_num(s).map_err(|_| ())?).read_u64::<BigEndian>().map_err(|_| ())?;
 
 
-                let (v, _) = map.iter().find(|(k, v)| {
+                let (v, _) = map.iter().find(|(_, v)| {
                     **v == wanted_value
                 }).ok_or(())?;
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),
-                    Any => {
+                    _ => {
                         let mut potential_value = vec![0u8];
                         loop {
                             match potential_value.last().unwrap() {
@@ -188,9 +185,8 @@ impl ValueMap {
                                 }
                             }
 
-                            match map.get(&Value::Value(potential_value.clone())) {
-                                None => break,
-                                _ => {}
+                            if map.get(&Value::Value(potential_value.clone())).is_none() {
+                                break
                             }
                         }
 
@@ -255,7 +251,7 @@ where
             if k.trim() == "_" {
                 Ok(Value::Any)
             } else {
-                parse_num_padded(k).map(|k| Value::Value(k))
+                parse_num_padded(k).map(Value::Value)
             }
         })
         .collect();

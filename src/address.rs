@@ -1,175 +1,139 @@
-use num::Num;
-use std::iter::FromIterator;
 use std::string::String;
 use std::collections::HashMap;
 use crate::sensor::Register;
+use serde_derive::Serialize;
+use lazy_static::lazy_static;
+use regex::Regex;
+use parse_num::parse_num_padded;
+use parse_num::parse_num;
+use fuseable_derive::Fuseable;
+use fuseable::{Fuseable, Either};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Fuseable, Clone)]
 pub struct Address {
     pub base: Vec<u8>,
-    pub slice: (u8, u8),
-//    pub size: usize,
+    pub slice_start: u8,
+    pub slice_end: u8,
 }
 
-
 impl Address {
-    pub fn parse_named(address: &String, regs: &HashMap<String, Register>) -> Result<Address, ()> {
-        let mut split = address.split('[');
-        match split.next() {
-            Some(name) => {
-                match regs.get(name) {
-                    Some(reg) => {
-                        match split.next() {
-                            Some(idx_part) => {
-                                Address::parse(&(reg.address.clone() + "[" + idx_part), reg.width.ok_or(())? as usize)
-                            }
-                            None => {
-                                Address::parse(&reg.address, reg.width.ok_or(())? as usize)
-                            }
-                        }
-                    }
-                    None => Err(())
-                }
-            }
-            None => Err(())
+    fn parse_internal(str: &str, register_set: Option<&HashMap<String, Register>>, width: Option<u8>) -> Result<Address, ()> {
+        lazy_static! {
+            static ref RE: Regex = Regex::new(r#"^([^\[\]]+)(\[(?:([^\[\]]+)?:([^\[\]]+)?|([^:\[\]]+))\])?$"#).unwrap();
         }
-    }
+    
+        match RE.captures(str) {
+            Some(captures) => {
+                // capture 0 is the whole string
+                // capture 1 is the base
+                let (base, base_reg) = match captures.get(1) {
+                    Some(m) => {
+                        let m_str = m.as_str();
+                        match parse_num_padded(m_str) {
+                            Ok(v) => (v, None),
+                            Err(_) => {
+                                let base = m_str.bytes().collect::<Vec<u8>>();
+                                let base_reg = register_set.and_then(|set| set.get(m_str));
 
-    pub fn parse(address: &String, amount: usize) -> Result<Address, ()> {
-        let address: Vec<char> = address.chars().filter(|c| !c.is_whitespace()).collect();
+                                let base = match base_reg {
+                                    Some(reg) => reg.address.base.clone(),
+                                    None => base
 
-        let mut idx = 0;
+                                };
 
-        let negative = match address[idx] {
-            '-' => {
-                idx += 1;
-                true
-            }
-            _ => false,
-        };
-
-        fn parse_number(idx: usize, s: &Vec<char>) -> (usize, usize) {
-            match (s.get(idx), s.get(idx + 1)) {
-                (Some('0'), Some('b')) => (2, idx + 2),
-                (Some('0'), Some('o')) => (8, idx + 2),
-                (Some('0'), Some('x')) => (16, idx + 2),
-                (Some('0'...'9'), _) => (10, idx),
-                (_, _) => panic!("invalid address {:?}", s),
-            }
-        }
-
-        fn get_number(
-            base: usize,
-            idx: usize,
-            s: &Vec<char>,
-            delim: char,
-        ) -> (Vec<char>, bool, usize) {
-            let mut found_delim = false;
-            let mut chars = Vec::new();
-            let mut idx = idx;
-
-            //            println!("parsing number, base: {}, idx: {}, s: {:?}, delim: {}", base, idx, s, delim);
-
-            loop {
-                match s.get(idx) {
-                    Some(c) => {
-                        //                        println!("found digit: {}", c);
-                        if *c == delim {
-                            found_delim = true;
-                            break;
-                        } else {
-                            //                            println!("found digit: {}", c);
-                            if c.is_digit(base as u32) {
-                                //                                println!("it is a valid digit :)");
-                                chars.push(c.clone())
-                            } else {
-                                //                                println!("it is NOT a valid digit :(");
-                                break;
+                                (base, base_reg)
                             }
                         }
                     }
                     None => {
-                        break;
+                        panic!("no base found, lol?");
                     }
+                };
+
+                fn parse_slice_num(v: Vec<u8>) -> u8 {
+                    if v.len() == 1 {
+                        v[0]
+                    } else if v.is_empty() {
+                        0
+                    } else {
+                        panic!("sorry slices longer than one u8 not supported (got {:?})", v); 
+                    } 
                 }
 
-                idx += 1;
-            }
-
-            (chars, found_delim, idx)
-        }
-
-        let (base, start) = parse_number(idx, &address);
-        let (base_chars, has_slice, mut idx) = get_number(base, start, &address, '[');
-        //        let base = usize::from_str_radix(&String::from_iter(base_chars), base as u32).unwrap();
-        use num::bigint::BigInt;
-        //        println!("{:?}", base_chars);
-        let base = BigInt::from_str_radix(&String::from_iter(base_chars), base as u32)
-            .map(|s| if negative { -s } else { s })
-            .map(|s| s.to_bytes_be().1)
-            .unwrap();
-
-        idx += 1;
-
-        let mut slice_start = 0u8;
-        let mut slice_end = (amount * 8) as u8;
-
-        if has_slice {
-            //            println!("has_slice");
-
-            let found_colon;
-            match address.get(idx) {
-                Some(':') => {
-                    //                    println!("slice starts with colon");
-                    found_colon = true;
-                    slice_start = 0;
-                }
-                _ => {
-                    //                    println!("slice has number before colon");
-                    let (base, start) = parse_number(idx, &address);
-                    let (start_chars, found_colon_here, end_idx) =
-                        get_number(base, start, &address, ':');
-                    found_colon = found_colon_here;
-                    slice_start =
-                        u8::from_str_radix(&String::from_iter(start_chars), base as u32).unwrap();
-                    idx = end_idx;
-                }
-            }
-
-            match address.get(idx) {
-                Some(':') => {
-                    idx += 1;
-
-                    match address.get(idx) {
-                        Some(']') => {}
-                        _ => {
-                            let (base, start) = parse_number(idx, &address);
-                            let (end_chars, found_end, _end_idx) =
-                                get_number(base, start, &address, ']');
-                            assert!(found_end, "invalid slice, missing ]");
-                            slice_end =
-                                u8::from_str_radix(&String::from_iter(end_chars), base as u32)
-                                    .unwrap();
-                        }
+                // capture 5 is the potential single bit slice
+                //
+                let (slice_start, slice_end) = match captures.get(5) {
+                    Some(m) => {
+                        let bit = parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?;
+                        (bit, bit + 1)
                     }
-                }
-
-                Some(']') => {
-                    assert!(!found_colon, "found colon when already at ]");
-                    slice_end = slice_start + 1;
-                }
-                _ => assert!(false, "invalid address to be parsed"),
+                    None => {
+                        // capture 2 is the potential slice
+                        // capture 3 is the potential slice start
+                        let slice_start = match captures.get(3) {
+                            Some(m) => {
+                                parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
+                            }
+                            None => {
+                                match base_reg {
+                                    Some(r) => {
+                                        r.address.slice_start
+                                    }
+                                    None => {
+                                        0
+                                    }
+                                }
+                            }
+                        };
+    
+                        // capture 4 is the potential slice end
+                        let slice_end = match captures.get(4) {
+                            Some(m) => {
+                                parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
+                            }
+                            None => {
+                                match base_reg {
+                                    Some(r) => {
+                                        r.address.slice_end
+                                    }
+                                    None => {
+                                        match width {
+                                            Some(w) => {
+                                                // width is in bytes
+                                                slice_start + w * 8 - 1
+                                            }
+                                            None => {
+                                                panic!("address did not specify an end of the slice and neither width nor base register are available ({})", str)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        
+                        (slice_start, slice_end)
+                    }
+                };
+    
+                Ok(Address {
+                    base,
+                    slice_start,
+                    slice_end
+                })
+            }
+    
+            None => {
+                panic!("could not parse address {}", str);
             }
         }
+    }
 
-        // println!("amount: {}, slice_end: {}, slice_end >> 3: {}", amount, slice_end, slice_end >> 3);
-        assert!(amount >= ((slice_end - slice_start) >> 3) as usize);
+    pub fn parse_named(address: &str, regs: &HashMap<String, Register>) -> Result<Address, ()> {
+        Address::parse_internal(address, Some(regs), None)
+    }
 
-        Ok(Address {
-            base,
-            slice: (slice_start, slice_end),
-//            size: amount,
-        })
+    pub fn parse(address: &str, amount: usize) -> Result<Address, ()> {
+        Address::parse_internal(address, None, Some(amount as u8))
     }
 
     /*
@@ -189,18 +153,18 @@ impl Address {
 
         for byte in self.base.iter().rev() {
             base <<= 8;
-            base |= (*byte as u64);
+            base |= u64::from(*byte);
         }
 
         base
     }
 
     pub fn bytes(&self) -> usize {
-        let bits = self.slice.1 - self.slice.0;
+        let bits = self.slice_end - self.slice_start;
         let extra_byte = if bits % 8 > 0 { 1 } else { 0 };
 
 
-        (extra_byte + bits >> 3) as usize
+        (extra_byte + (bits >> 3)) as usize
     }
 }
 
@@ -214,40 +178,40 @@ mod tests {
             Address::parse(&"0x1234[1]".to_string(), 2),
             Ok(Address {
                 base: vec![0x12, 0x34],
-                slice: (1, 2),
-                size: 2
+                slice_start: 1,
+                slice_end: 2,
             })
         );
         assert_eq!(
             Address::parse(&"0x1234[:1]".to_string(), 2),
             Ok(Address {
                 base: vec![0x12, 0x34],
-                slice: (0, 1),
-                size: 2
+                slice_start: 0,
+                slice_end: 1
             })
         );
         assert_eq!(
             Address::parse(&"0x1234[1:]".to_string(), 2),
             Ok(Address {
                 base: vec![0x12, 0x34],
-                slice: (1, 16),
-                size: 2
+                slice_start: 1,
+                slice_end: 16
             })
         );
         assert_eq!(
             Address::parse(&"0x1234[1:3]".to_string(), 2),
             Ok(Address {
                 base: vec![0x12, 0x34],
-                slice: (1, 3),
-                size: 2
+                slice_start: 1,
+                slice_end: 3,
             })
         );
         assert_eq!(
             Address::parse(&"0x1234[0x1:0xa]".to_string(), 2),
             Ok(Address {
                 base: vec![0x12, 0x34],
-                slice: (1, 10),
-                size: 2
+                slice_start: 1,
+                slice_end: 10
             })
         );
     }

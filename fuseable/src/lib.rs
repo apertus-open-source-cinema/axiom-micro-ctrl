@@ -2,15 +2,14 @@ use fuse_mt::*;
 use itertools::Itertools;
 use lru::LruCache;
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use time::*;
+use std::os::raw::c_int;
 
 #[derive(Debug, Clone)]
 pub enum Either<A, B> {
@@ -19,15 +18,15 @@ pub enum Either<A, B> {
 }
 
 pub trait Fuseable: Sync + Send {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()>;
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()>;
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()>;
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()>;
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()>;
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()>;
 }
 
 macro_rules! impl_fuseable_with_to_string {
     ($t:ident) => {
         impl Fuseable for $t {
-            fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+            fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
                 match path.next() {
                     Some(_) => Err(()),
                     None => Ok(false),
@@ -36,7 +35,7 @@ macro_rules! impl_fuseable_with_to_string {
 
             fn read(
                 &self,
-                path: &mut Iterator<Item = &str>,
+                path: &mut dyn Iterator<Item = &str>,
             ) -> Result<Either<Vec<String>, String>, ()> {
                 match path.next() {
                     Some(_) => Err(()),
@@ -46,7 +45,7 @@ macro_rules! impl_fuseable_with_to_string {
 
             fn write(
                 &mut self,
-                path: &mut Iterator<Item = &str>,
+                path: &mut dyn Iterator<Item = &str>,
                 value: Vec<u8>,
             ) -> Result<(), ()> {
                 match path.next() {
@@ -78,7 +77,7 @@ impl_fuseable_with_to_string!(f32);
 impl_fuseable_with_to_string!(f64);
 
 impl<T: Fuseable> Fuseable for Vec<T> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(idx) => match idx.parse::<usize>() {
                 Ok(idx) => match self.get(idx) {
@@ -91,7 +90,7 @@ impl<T: Fuseable> Fuseable for Vec<T> {
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(idx) => match idx.parse::<usize>() {
                 Ok(idx) => match self.get(idx) {
@@ -106,7 +105,7 @@ impl<T: Fuseable> Fuseable for Vec<T> {
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(idx) => match idx.parse::<usize>() {
                 Ok(idx) => match self.get_mut(idx) {
@@ -121,83 +120,83 @@ impl<T: Fuseable> Fuseable for Vec<T> {
 }
 
 impl<T: Fuseable> Fuseable for Arc<Mutex<T>> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         self.lock().unwrap().is_dir(path)
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         self.lock().unwrap().read(path)
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         self.lock().unwrap().write(path, value)
     }
 }
 
 impl<T: Fuseable + ?Sized> Fuseable for Box<T> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         Deref::deref(self).is_dir(path)
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         Deref::deref(self).read(path)
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         DerefMut::deref_mut(self).write(path, value)
     }
 }
 
 impl<T: Fuseable> Fuseable for Mutex<T> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         self.lock().unwrap().is_dir(path)
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         self.lock().unwrap().read(path)
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         self.lock().unwrap().write(path, value)
     }
 }
 
 impl<'a> Fuseable for &'a str {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(_) => Err(()),
             None => Ok(false),
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(_) => Err(()),
             None => Ok(Either::Right(self.to_string())),
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, _path: &mut dyn Iterator<Item = &str>, _value: Vec<u8>) -> Result<(), ()> {
         Err(())
     }
 }
 
 impl<TY: Fuseable> Fuseable for Option<TY> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match self {
             Some(v) => Fuseable::is_dir(v, path),
             None => Ok(false),
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match self {
             Some(v) => Fuseable::read(v, path),
             None => Ok(Either::Right("None".to_string())),
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match self {
             Some(v) => Fuseable::write(v, path, value),
             None => Err(()),
@@ -206,7 +205,7 @@ impl<TY: Fuseable> Fuseable for Option<TY> {
 }
 
 impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(name) => match self.get(&name.to_string()) {
                 Some(inner) => inner.is_dir(path),
@@ -216,7 +215,7 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(name) => match self.get(&name.to_string()) {
                 Some(inner) => inner.read(path),
@@ -224,13 +223,12 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
             },
             None => {
                 let keys: Vec<_> = self.keys().cloned().collect();
-                let keys = keys.into_iter().map(|k| String::from(k)).collect();
                 Ok(Either::Left(keys))
             }
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(name) => match self.get_mut(&name.to_string()) {
                 Some(inner) => inner.write(path, value),
@@ -241,10 +239,10 @@ impl<'a, VT: Fuseable> Fuseable for BTreeMap<String, VT> {
     }
 }
 
-impl<'a, VT: Fuseable, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone> Fuseable
-    for HashMap<KT, VT>
+impl<'a, VT: Fuseable, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone, S: std::hash::BuildHasher + Send + Sync> Fuseable
+    for HashMap<KT, VT, S>
 {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(name) => match self.get(&name.parse().map_err(|_| ())?) {
                 Some(inner) => inner.is_dir(path),
@@ -254,7 +252,7 @@ impl<'a, VT: Fuseable, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone>
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(name) => match self.get(&name.parse().map_err(|_| ())?) {
                 Some(inner) => inner.read(path),
@@ -267,7 +265,7 @@ impl<'a, VT: Fuseable, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone>
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(name) => match self.get_mut(&name.parse().map_err(|_| ())?) {
                 Some(inner) => inner.write(path, value),
@@ -285,7 +283,7 @@ use isomorphism::BiMap;
 impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + Hash + Clone>
     Fuseable for BiMap<KT, VT>
 {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(name) => match self.get_left(&name.parse().map_err(|_| ())?) {
                 Some(inner) => inner.is_dir(path),
@@ -295,7 +293,7 @@ impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + H
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(name) => match self.get_left(&name.parse().map_err(|_| ())?) {
                 Some(inner) => inner.read(path),
@@ -304,7 +302,7 @@ impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + H
             None => {
                 let keys: Vec<_> = self
                     .iter()
-                    .map(|(k, v)| k)
+                    .map(|(k, _v)| k)
                     .cloned()
                     .map(|k| k.to_string())
                     .collect();
@@ -314,7 +312,7 @@ impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + H
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(name) => {
                 let parsed_name = name.parse().map_err(|_| ())?;
@@ -331,7 +329,7 @@ impl<'a, VT: Fuseable + Hash + Eq, KT: FromStr + ToString + Sync + Send + Eq + H
 
 /*
 impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         match path.next() {
             Some(name) => match self.get(&name.to_string()) {
                 Some(inner) => inner.is_dir(path),
@@ -341,7 +339,7 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
         }
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(name) => match self.get(&name.to_string()) {
                 Some(inner) => inner.read(path),
@@ -355,7 +353,7 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
         }
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(name) => match self.get_mut(&name.to_string()) {
                 Some(inner) => inner.write(path, value),
@@ -371,15 +369,15 @@ impl<'a, VT: Fuseable> Fuseable for HashMap<String, VT> {
 pub struct CachedFuseable {
     is_dir_cache: RwLock<LruCache<u64, Result<bool, ()>>>,
     read_dir_cache: RwLock<LruCache<u64, Result<Either<Vec<String>, String>, ()>>>,
-    fuseable: Box<Fuseable>,
+    fuseable: Box<dyn Fuseable>,
 }
 
 impl CachedFuseable {
-    pub fn new(fuseable: Box<Fuseable>, cache_size: usize) -> CachedFuseable {
+    pub fn new(fuseable: Box<dyn Fuseable>, cache_size: usize) -> CachedFuseable {
         CachedFuseable {
             is_dir_cache: RwLock::new(LruCache::new(cache_size)),
             read_dir_cache: RwLock::new(LruCache::new(cache_size)),
-            fuseable: fuseable,
+            fuseable,
         }
     }
 }
@@ -387,7 +385,7 @@ impl CachedFuseable {
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-fn calculate_hash<T: Hash>(t: &mut Iterator<Item = T>) -> u64 {
+fn calculate_hash<T: Hash>(t: &mut dyn Iterator<Item = T>) -> u64 {
     let mut s = DefaultHasher::new();
     for i in t {
         i.hash(&mut s);
@@ -396,13 +394,13 @@ fn calculate_hash<T: Hash>(t: &mut Iterator<Item = T>) -> u64 {
 }
 
 impl Fuseable for CachedFuseable {
-    fn is_dir(&self, path: &mut Iterator<Item = &str>) -> Result<bool, ()> {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool, ()> {
         let (mut path, mut path_for_hash) = path.tee();
         let hash = calculate_hash(&mut path_for_hash);
 
         let mut update_cache = false;
         let is_dir = match self.is_dir_cache.write().unwrap().get(&hash) {
-            Some(r) => r.clone(),
+            Some(r) => *r,
             None => {
                 update_cache = true;
                 Fuseable::is_dir(self.fuseable.deref(), &mut path)
@@ -418,7 +416,7 @@ impl Fuseable for CachedFuseable {
         // Fuseable::is_dir(self.fuseable.deref(), path)
     }
 
-    fn read(&self, path: &mut Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>, ()> {
         let (mut path, mut path_for_hash) = path.tee();
         let hash = calculate_hash(&mut path_for_hash);
 
@@ -434,11 +432,8 @@ impl Fuseable for CachedFuseable {
         };
 
         if update_cache {
-            match read {
-                Ok(Either::Left(_)) => {
-                    self.read_dir_cache.write().unwrap().put(hash, read.clone());
-                }
-                _ => {}
+            if let Ok(Either::Left(_)) = read {
+                self.read_dir_cache.write().unwrap().put(hash, read.clone());
             }
         }
 
@@ -447,13 +442,13 @@ impl Fuseable for CachedFuseable {
         // Fuseable::read(self.fuseable.deref(), path)
     }
 
-    fn write(&mut self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         Fuseable::write(self.fuseable.deref_mut(), path, value)
     }
 }
 
 pub struct FuseableWrapper<'a> {
-    inner: RwLock<Box<Fuseable + 'a>>,
+    inner: RwLock<Box<dyn Fuseable + 'a>>,
     //    getattr_cache: RwLock<LruCache<String, Result<bool, ()>>>,
     //    readdir_cache: RwLock<LruCache<String, Result<Either<Vec<String>, String>, ()>>>,
 }
@@ -479,11 +474,11 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
 
     fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
         //        println!("getattr: {:?}", path);
-        if let Some(fh) = fh {
+        if let Some(_fh) = fh {
             //            println!("getattr: unhandled open file {}", fh);
             Err(1)
         } else {
-            //            fn read(&self, path: &mut Iterator<Item = String>) -> Result<Either<Vec<String>, String>, ()>;
+            //            fn read(&self, path: &mut dyn Iterator<Item = String>) -> Result<Either<Vec<String>, String>, ()>;
 
             Fuseable::is_dir(
                 (&*self.inner.read().unwrap()).deref(),
@@ -499,9 +494,10 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
                         mtime: Timespec { sec: 0, nsec: 0 },
                         ctime: Timespec { sec: 0, nsec: 0 },
                         crtime: Timespec { sec: 0, nsec: 0 },
-                        kind: match v {
-                            true => FileType::Directory,
-                            false => FileType::RegularFile,
+                        kind: if v {
+                            FileType::Directory 
+                        } else {
+                            FileType::RegularFile
                         },
                         perm: 0o777,
                         nlink: 2,
@@ -529,7 +525,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         }
     }
 
-    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
+    fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
         //        println!("readdir: {:?}", path);
         Fuseable::read(
             (&*self.inner.read().unwrap()).deref(),
@@ -547,7 +543,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         })
         .map_err(|_| 1)
     }
-    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+    fn open(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         //        println!("open: {:?} flags={:#x}", path, flags);
 
         match Fuseable::is_dir(
@@ -560,16 +556,16 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         }
     }
 
-    fn read(&self, _req: RequestInfo, path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
+    fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, _offset: u64, _size: u32, result: impl FnOnce(Result<&[u8], c_int>)) {
         //        println!("read: {:?} {:#x} @ {:#x}", path, size, offset);
 
         match Fuseable::read(
             (&*self.inner.read().unwrap()).deref(),
             &mut path.to_string_lossy().split_terminator('/').skip(1),
         ) {
-            Ok(Either::Left(_)) => Err(1),
-            Ok(Either::Right(s)) => Ok(s.into_bytes()),
-            Err(_) => Err(1),
+            Ok(Either::Left(_)) => result(Err(1)),
+            Ok(Either::Right(s)) => result(Ok(&s.into_bytes())),
+            Err(_) => result(Err(1)),
         }
     }
 
@@ -577,8 +573,8 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         &self,
         _req: RequestInfo,
         path: &Path,
-        fh: u64,
-        offset: u64,
+        _fh: u64,
+        _offset: u64,
         data: Vec<u8>,
         _flags: u32,
     ) -> ResultWrite {
@@ -594,7 +590,7 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
         .map(|_| len as u32)
     }
 
-    fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
+    fn truncate(&self, _req: RequestInfo, _path: &Path, _fh: Option<u64>, _size: u64) -> ResultEmpty {
         //        println!("truncate: {:?} to {:#x}", path, size);
         Ok(())
     }

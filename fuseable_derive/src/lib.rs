@@ -1,3 +1,4 @@
+#![feature(extern_crate_item_prelude)]
 #![recursion_limit = "512"]
 
 extern crate proc_macro;
@@ -197,7 +198,7 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
 
 fn impl_struct(
     data: &syn::DataStruct,
-    virtual_fields: &Vec<VirtualField>,
+    virtual_fields: &[VirtualField],
 ) -> (TokenStream, TokenStream, TokenStream) {
     let (is_dir, read, write) = match data.fields {
         syn::Fields::Named(ref fields) => {
@@ -221,7 +222,7 @@ fn impl_struct(
 
             // println!("implementing virtual fields {:?}", virtual_fields);
             impl_fields(
-                &fields.named.iter().collect(),
+                &fields.named.iter().collect::<Vec<_>>(),
                 &read_prefix,
                 &write_prefix,
                 virtual_fields,
@@ -481,10 +482,10 @@ fn parse_field(field: &&syn::Field) -> ParsedField {
 }
 
 fn impl_fields(
-    fields: &Vec<&Field>,
+    fields: &[&Field],
     prefix_read: &TokenStream,
     prefix_write: &TokenStream,
-    virtual_fields: &Vec<VirtualField>,
+    virtual_fields: &[VirtualField],
 ) -> (TokenStream, TokenStream, TokenStream) {
     let fields_read: Vec<_> = fields
         .iter()

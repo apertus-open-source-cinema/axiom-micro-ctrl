@@ -25,7 +25,7 @@ impl FileOpener {
 }
 
 lazy_static! {
-    pub static ref file_opener: FileOpener = FileOpener {
+    pub static ref FILE_OPENER: FileOpener = FileOpener {
         path: Mutex::new(None),
     };
 }
@@ -37,7 +37,7 @@ where
 {
     let path = String::deserialize(deserializer)?;
 
-    let mut f = file_opener.open(&path).expect("file not found");
+    let mut f = FILE_OPENER.open(&path).expect("file not found");
 
     let mut contents = String::new();
     f.read_to_string(&mut contents)

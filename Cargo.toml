@@ -24,6 +24,7 @@ serde_yaml = "*"
 structopt = "*"
 paste = "*"
 byteorder = "*"
+regex = "*"
 
 [profile.release]
 codegen-units = 16

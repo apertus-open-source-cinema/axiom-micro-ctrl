@@ -1,10 +1,9 @@
 #![feature(inner_deref)]
 
 use crate::sensor::Sensor;
-use crate::serde_util::file_opener;
-use fuseable::{FuseableWrapper, Fuseable, CachedFuseable};
+use crate::serde_util::FILE_OPENER;
+use fuseable::{FuseableWrapper};
 use std::ffi::OsStr;
-use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -30,8 +29,8 @@ struct Opt {
 fn main() {
     let opt = Opt::from_args();
 
-    let mut f = file_opener.open(&opt.file).unwrap();
-    file_opener.set_path(PathBuf::from(opt.file));
+    let mut f = FILE_OPENER.open(&opt.file).unwrap();
+    FILE_OPENER.set_path(PathBuf::from(opt.file));
 
     let mut contents = String::new();
     f.read_to_string(&mut contents)

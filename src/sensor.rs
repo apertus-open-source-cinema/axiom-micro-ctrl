@@ -7,19 +7,19 @@ use fuseable_derive::Fuseable;
 use itertools::izip;
 use num::Num;
 use parse_num::parse_num_mask;
-use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Error, Deserialize, Deserializer};
 use serde_derive::*;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Serialize, Deserialize, Fuseable)]
+#[derive(Debug, Serialize, Deserialize, Fuseable, Clone)]
 #[serde(untagged)]
 enum Range {
     MinMax { min: i64, max: i64 },
 }
 
-#[derive(Debug, Serialize, Deserialize, Fuseable)]
+#[derive(Debug, Serialize, Deserialize, Fuseable, Clone)]
 #[serde(untagged)]
 enum Description {
     Simple(String),
@@ -27,7 +27,7 @@ enum Description {
 }
 
 // #[fuseable(virtual_field(name = "value", read = "self.read_value", write = "self.write_value", is_dir = "self.value_is_dir"))]
-#[derive(Debug, Serialize, Deserialize, Fuseable)]
+#[derive(Debug, Serialize, Fuseable, Clone)]
 #[fuseable(virtual_field(
     name = "value",
     read = "self.read_value",
@@ -36,7 +36,7 @@ enum Description {
 ))]
 pub struct Register {
     #[fuseable(ro)]
-    pub address: String,
+    pub address: Address,
     #[fuseable(ro)]
     pub width: Option<u8>,
     #[fuseable(ro)]
@@ -52,6 +52,31 @@ pub struct Register {
     #[serde(skip)]
     #[fuseable(ro)]
     comm_channel: Option<Arc<Mutex<CommunicationChannel>>>,
+}
+
+impl<'de> Deserialize<'de> for Register {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de> {
+        #[derive(Deserialize)]
+        pub struct RegisterStringAddr {
+            pub address: String,
+            pub width: Option<u8>,
+            mask: Option<String>,
+            #[serde(flatten)]
+            range: Option<Range>,
+            #[serde(default, deserialize_with = "by_string_option_num")]
+            default: Option<u64>,
+            description: Option<Description>,
+            #[serde(skip)]
+            comm_channel: Option<Arc<Mutex<CommunicationChannel>>>,
+        }
+
+        let reg = RegisterStringAddr::deserialize(deserializer)?;
+
+        let address = Address::parse(&reg.address, reg.width.unwrap_or(1) as usize).map_err(|_| D::Error::custom("error parsing address"))?;
+
+        Ok(Register { address, width: reg.width, mask: reg.mask, range: reg.range, default: reg.default, description: reg.description, comm_channel: reg.comm_channel })
+    }
 }
 
 /*
@@ -100,19 +125,19 @@ where
                 (Some('0'), Some('b')) => (2, 2),
                 (Some('0'), Some('o')) => (8, 2),
                 (Some('0'), Some('x')) => (16, 2),
-                (Some('0'...'9'), _) => (10, 0),
+                (Some('0'..='9'), _) => (10, 0),
                 (_, _) => panic!("invalid address {:?}", v),
             };
 
             T::from_str_radix(&String::from_iter(&v[start..]), base)
-                .map(|t| Some(t))
+                .map(Some)
                 .map_err(D::Error::custom)
         }
     }
 }
 
 fn to_hex(v: Vec<u8>) -> String {
-    if v.len() > 0 {
+    if !v.is_empty() {
         "0x".to_string()
             + &v.iter()
                 .map(|v| format!("{:02X}", v).to_string())
@@ -125,7 +150,7 @@ fn to_hex(v: Vec<u8>) -> String {
 impl Register {
     fn read_value(
         &self,
-        path: &mut Iterator<Item = &str>,
+        path: &mut dyn Iterator<Item = &str>,
     ) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(_) => Err(()),
@@ -133,23 +158,20 @@ impl Register {
                 let comm_channel = self.comm_channel.clone().unwrap();
                 let comm_channel = comm_channel.lock().unwrap();
 
-                if let Some(width) = self.width {
-                    comm_channel
-                        .read_value(&Address::parse(&self.address, width as usize)?)
-                        .map(|v| Either::Right(to_hex(v)))
-                } else {
-                    Err(())
-                }
+                comm_channel.read_value(&self.address)
+                    .map(|v| Either::Right(to_hex(v)))
             }
         }
     }
 
-    fn write_value(&self, path: &mut Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write_value(&self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(_) => Err(()),
             None => {
                 let comm_channel = self.comm_channel.clone().unwrap();
                 let comm_channel = comm_channel.lock().unwrap();
+
+                println!("writing");
 
                 if let Some(width) = self.width {
                     let (mask, mut value) =
@@ -185,7 +207,7 @@ impl Register {
                             }
 
                             let current_value = comm_channel
-                                .read_value(&Address::parse(&self.address, width as usize)?)?;
+                                .read_value(&self.address)?;
 
                             izip!(mask, value, current_value)
                                 .map(|(m, val, cur)| (val & m) | (cur & !m))
@@ -194,7 +216,7 @@ impl Register {
                         None => value,
                     };
 
-                    comm_channel.write_value(&Address::parse(&self.address, width as usize)?, value)
+                    comm_channel.write_value(&self.address, value)
                 } else {
                     Err(())
                 }
@@ -213,7 +235,7 @@ struct RegisterSet {
 struct RegisterSetting {
     #[fuseable(ro)]
     channel: Arc<Mutex<CommunicationChannel>>,
-    map: Arc<Mutex<RegisterSet>>,
+    map: RegisterSet,
     functions: HashMap<String, Function>,
 }
 
@@ -223,12 +245,25 @@ impl<'de> Deserialize<'de> for RegisterSetting {
         D: Deserializer<'de>,
     {
         #[derive(Debug, Deserialize)]
+        struct FunctionStringAddr {
+            addr: String,
+            desc: Option<Description>,
+            #[serde(default, deserialize_with = "deser_valuemap")]
+            map: Option<ValueMap>,
+            #[serde(default = "bool_false")]
+            writable: bool,
+            default: Option<u64>,
+            #[serde(skip)]
+            channel: Option<Arc<Mutex<CommunicationChannel>>>,
+        }
+
+        #[derive(Debug, Deserialize)]
         struct RegisterSettingConfig {
             channel: CommunicationChannel,
             #[serde(deserialize_with = "by_path")]
             map: RegisterSet,
             #[serde(deserialize_with = "by_path")]
-            functions: HashMap<String, Function>,
+            functions: HashMap<String, FunctionStringAddr>,
         }
 
         let settings = RegisterSettingConfig::deserialize(deserializer)?;
@@ -247,25 +282,29 @@ impl<'de> Deserialize<'de> for RegisterSetting {
                     },
                 )
             })
-            .collect();
+            .collect::<HashMap<_, _>>();
 
-        let map = RegisterSet { registers };
-        let map = Arc::new(Mutex::new(map));
+        let map = RegisterSet { registers: registers.clone() };
 
         let functions = settings
             .functions
             .into_iter()
             .map(|(name, func)| {
-                (
+                let addr = Address::parse_named(&func.addr, &registers).map_err(|_| D::Error::custom(format!("could not parse the address of this function ({})", func.addr)))?;
+
+                Ok((
                     name,
                     Function {
                         channel: Some(channel.clone()),
-                        regs: Some(map.clone()),
-                        ..func
+                        addr,
+                        desc: func.desc,
+                        map: func.map,
+                        default: func.default,
+                        writable: func.writable
                     },
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<HashMap<String, Function>, _>>()?;
 
         Ok(RegisterSetting {
             channel,
@@ -275,7 +314,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Fuseable)]
+#[derive(Debug, Serialize, Fuseable)]
 #[fuseable(virtual_field(
     name = "value",
     read = "self.read_value",
@@ -284,7 +323,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
 ))]
 struct Function {
     #[fuseable(ro)]
-    addr: String,
+    addr: Address,
     #[fuseable(ro)]
     desc: Option<Description>,
     //    #[fuseable(skip)]
@@ -298,29 +337,21 @@ struct Function {
     #[serde(skip)]
     #[fuseable(ro)]
     channel: Option<Arc<Mutex<CommunicationChannel>>>,
-    #[serde(skip)]
-    #[fuseable(ro)]
-    regs: Option<Arc<Mutex<RegisterSet>>>,
 }
 
 impl Function {
     fn read_value(
         &self,
-        path: &mut Iterator<Item = &str>,
+        path: &mut dyn Iterator<Item = &str>,
     ) -> Result<Either<Vec<String>, String>, ()> {
         match path.next() {
             Some(_) => Err(()),
             None => {
-                let addr = Address::parse_named(
-                    &self.addr,
-                    &self.regs.deref().ok_or(())?.lock().map_err(|_| ())?.registers,
-                )?;
-
                 let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
-                let value = channel.read_value(&addr)?;
+                let value = channel.read_value(&self.addr)?;
 
                 match &self.map {
-                    Some(map) => map.lookup(value).map(|v| Either::Right(v)),
+                    Some(map) => map.lookup(value).map(Either::Right),
                     None => Ok(Either::Right(to_hex(value))),
                 }
             }
@@ -329,20 +360,12 @@ impl Function {
 
     fn write_value(
         &self,
-        path: &mut Iterator<Item = &str>,
+        path: &mut dyn Iterator<Item = &str>,
         value: Vec<u8>
     ) -> Result<(), ()> {
-
-
         match path.next() {
             Some(_) => Err(()),
             None => {
-
-                let addr = Address::parse_named(
-                    &self.addr,
-                    &self.regs.deref().ok_or(())?.lock().map_err(|_| ())?.registers,
-                )?;
-
                 let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
 
                 let value = match &self.map {
@@ -352,7 +375,7 @@ impl Function {
 
                 println!("encoded value: {:?}", value);
 
-                channel.write_value(&addr, value)
+                channel.write_value(&self.addr, value)
             }
         }
     }

@@ -1,11 +1,8 @@
 #![feature(inner_deref)]
 
-use crate::sensor::Sensor;
-use crate::serde_util::FILE_OPENER;
-use fuseable::{FuseableWrapper};
-use std::ffi::OsStr;
-use std::io::Read;
-use std::path::PathBuf;
+use crate::{sensor::Sensor, serde_util::FILE_OPENER};
+use fuseable::FuseableWrapper;
+use std::{ffi::OsStr, io::Read, path::PathBuf};
 use structopt::StructOpt;
 
 mod address;
@@ -21,9 +18,13 @@ struct Opt {
     /// Config file describing the camera components and their functionality
     #[structopt(name = "FILE")]
     file: String,
-    /// Set all communication channels to mock mode to prevent them from actually doing anything
+    /// Set all communication channels to mock mode to prevent them from
+    /// actually doing anything
     #[structopt(short = "m", long = "mock")]
     mock: bool,
+    /// Mountpoint of the fuse config filesystem
+    #[structopt(short = "d", long = "mountpoint", default_value = ".propfs")]
+    mountpoint: String,
 }
 
 fn main() {
@@ -33,12 +34,10 @@ fn main() {
     FILE_OPENER.set_path(PathBuf::from(opt.file));
 
     let mut contents = String::new();
-    f.read_to_string(&mut contents)
-        .expect("something went wrong reading the file");
+    f.read_to_string(&mut contents).expect("something went wrong reading the file");
 
     let mut sensor: Sensor = serde_yaml::from_str(&contents).unwrap();
     sensor.mocked(opt.mock);
-
 
 
     // println!("{:#?}", sensor);
@@ -54,5 +53,5 @@ fn main() {
     // let s: Box<Fuseable> = Box::new(s);
     let fuse_args: Vec<&OsStr> = vec![&OsStr::new("-o"), &OsStr::new("auto_unmount")];
     // let cached_fs: Box<Fuseable> = Box::new(cached_s);
-    fuse_mt::mount(fuse_mt::FuseMT::new(s, 1), &".propfs", &fuse_args).unwrap();
+    fuse_mt::mount(fuse_mt::FuseMT::new(s, 1), &opt.mountpoint, &fuse_args).unwrap();
 }

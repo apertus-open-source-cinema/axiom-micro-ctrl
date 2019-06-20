@@ -8,8 +8,7 @@ use memmap::{MmapMut, MmapOptions};
 use paste;
 use serde::*;
 use serde_derive::{Deserialize, Serialize};
-use std::fs::OpenOptions;
-use std::sync::RwLock;
+use std::{fs::OpenOptions, sync::RwLock};
 
 pub type CommunicationChannel = Box<dyn CommChannel>;
 
@@ -18,7 +17,12 @@ pub trait CommChannel: Debug + Fuseable {
     fn write_value_real(&self, address: &Address, value: Vec<u8>) -> Result<(), ()>;
 
     fn read_value_mock(&self, address: &Address) -> Result<Vec<u8>, ()> {
-        println!("MOCK READ {:?} bits at {:?} by {:?}", address.slice_end - address.slice_start, address, self);
+        println!(
+            "MOCK READ {:?} bits at {:?} by {:?}",
+            address.slice_end - address.slice_start,
+            address,
+            self
+        );
         Ok(vec![])
     }
 
@@ -77,7 +81,8 @@ struct MMAPGPIO {
 
 impl I2CCdev {
     fn init(&self) -> Result<LinuxI2CDevice, ()> {
-        LinuxI2CDevice::new(format!("/dev/i2c-{}", self.bus), u16::from(self.address)).map_err(|_| ())
+        LinuxI2CDevice::new(format!("/dev/i2c-{}", self.bus), u16::from(self.address))
+            .map_err(|_| ())
     }
 }
 
@@ -118,23 +123,13 @@ impl CommChannel for I2CCdev {
         let mut tmp = Vec::new();
         tmp.extend(&address.base);
         tmp.extend(value);
-        
-        with_dev(
-            &self.dev,
-            |i2c_dev| {
-                i2c_dev.write(&tmp).map_err(|_| ())
-            },
-            || self.init(),
-        )
+
+        with_dev(&self.dev, |i2c_dev| i2c_dev.write(&tmp).map_err(|_| ()), || self.init())
     }
 
-    fn mock_mode(&mut self, mock: bool) {
-        self.mock = mock;
-    }
+    fn mock_mode(&mut self, mock: bool) { self.mock = mock; }
 
-    fn get_mock_mode(&self) -> bool {
-        self.mock
-    }
+    fn get_mock_mode(&self) -> bool { self.mock }
 }
 
 impl CommChannel for MMAPGPIO {
@@ -144,10 +139,7 @@ impl CommChannel for MMAPGPIO {
         with_dev(
             &self.dev,
             |mmap_dev| {
-                mmap_dev
-                    .get(offset..(offset + address.bytes()))
-                    .map(|v| v.to_vec())
-                    .ok_or(())
+                mmap_dev.get(offset..(offset + address.bytes())).map(|v| v.to_vec()).ok_or(())
             },
             || self.init(),
         )
@@ -168,13 +160,9 @@ impl CommChannel for MMAPGPIO {
         )
     }
 
-    fn mock_mode(&mut self, mock: bool) {
-        self.mock = mock;
-    }
+    fn mock_mode(&mut self, mock: bool) { self.mock = mock; }
 
-    fn get_mock_mode(&self) -> bool {
-        self.mock
-    }
+    fn get_mock_mode(&self) -> bool { self.mock }
 }
 
 fn with_dev<D, F, I, T>(dev: &RwLock<Option<D>>, func: F, init: I) -> Result<T, ()>

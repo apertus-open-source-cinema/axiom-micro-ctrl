@@ -18,8 +18,8 @@ fn get_negative_radix_start(s: &[char]) -> Result<(bool, u32, usize), ParseError
         (Some('0'), Some('x')) => Ok((negative, 16, 2)),
         (Some('0'), Some('o')) => Ok((negative, 8, 2)),
         (Some('0'), Some('b')) => Ok((negative, 2, 2)),
-        (Some('0'...'9'), _) => Ok((negative, 10, 0)),
-        _ => return Err("could not determine radix".to_owned()),
+        (Some('0'..='9'), _) => Ok((negative, 10, 0)),
+        _ => Err("could not determine radix".to_owned()),
     }
 }
 

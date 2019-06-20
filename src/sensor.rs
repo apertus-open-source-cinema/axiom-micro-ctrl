@@ -1,7 +1,9 @@
-use crate::address::Address;
-use crate::communication_channel::CommunicationChannel;
-use crate::serde_util::{bool_false, by_path};
-use crate::valuemap::*;
+use crate::{
+    address::Address,
+    communication_channel::CommunicationChannel,
+    serde_util::{bool_false, by_path},
+    valuemap::*,
+};
 use fuseable::{Either, Fuseable};
 use fuseable_derive::Fuseable;
 use itertools::izip;
@@ -9,9 +11,11 @@ use num::Num;
 use parse_num::parse_num_mask;
 use serde::{de::Error, Deserialize, Deserializer};
 use serde_derive::*;
-use std::collections::HashMap;
-use std::iter::FromIterator;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    iter::FromIterator,
+    sync::{Arc, Mutex},
+};
 
 #[derive(Debug, Serialize, Deserialize, Fuseable, Clone)]
 #[serde(untagged)]
@@ -26,7 +30,8 @@ enum Description {
     LongAndShort { long: String, short: String },
 }
 
-// #[fuseable(virtual_field(name = "value", read = "self.read_value", write = "self.write_value", is_dir = "self.value_is_dir"))]
+// #[fuseable(virtual_field(name = "value", read = "self.read_value", write =
+// "self.write_value", is_dir = "self.value_is_dir"))]
 #[derive(Debug, Serialize, Fuseable, Clone)]
 #[fuseable(virtual_field(
     name = "value",
@@ -56,7 +61,9 @@ pub struct Register {
 
 impl<'de> Deserialize<'de> for Register {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: Deserializer<'de> {
+    where
+        D: Deserializer<'de>,
+    {
         #[derive(Deserialize)]
         pub struct RegisterStringAddr {
             pub address: String,
@@ -73,9 +80,18 @@ impl<'de> Deserialize<'de> for Register {
 
         let reg = RegisterStringAddr::deserialize(deserializer)?;
 
-        let address = Address::parse(&reg.address, reg.width.unwrap_or(1) as usize).map_err(|_| D::Error::custom("error parsing address"))?;
+        let address = Address::parse(&reg.address, reg.width.unwrap_or(1) as usize)
+            .map_err(|_| D::Error::custom("error parsing address"))?;
 
-        Ok(Register { address, width: reg.width, mask: reg.mask, range: reg.range, default: reg.default, description: reg.description, comm_channel: reg.comm_channel })
+        Ok(Register {
+            address,
+            width: reg.width,
+            mask: reg.mask,
+            range: reg.range,
+            default: reg.default,
+            description: reg.description,
+            comm_channel: reg.comm_channel,
+        })
     }
 }
 
@@ -126,7 +142,7 @@ where
                 (Some('0'), Some('o')) => (8, 2),
                 (Some('0'), Some('x')) => (16, 2),
                 (Some('0'..='9'), _) => (10, 0),
-                (_, _) => panic!("invalid address {:?}", v),
+                (..) => panic!("invalid address {:?}", v),
             };
 
             T::from_str_radix(&String::from_iter(&v[start..]), base)
@@ -138,10 +154,7 @@ where
 
 fn to_hex(v: Vec<u8>) -> String {
     if !v.is_empty() {
-        "0x".to_string()
-            + &v.iter()
-                .map(|v| format!("{:02X}", v).to_string())
-                .collect::<String>()
+        "0x".to_string() + &v.iter().map(|v| format!("{:02X}", v).to_string()).collect::<String>()
     } else {
         "".to_string()
     }
@@ -158,8 +171,7 @@ impl Register {
                 let comm_channel = self.comm_channel.clone().unwrap();
                 let comm_channel = comm_channel.lock().unwrap();
 
-                comm_channel.read_value(&self.address)
-                    .map(|v| Either::Right(to_hex(v)))
+                comm_channel.read_value(&self.address).map(|v| Either::Right(to_hex(v)))
             }
         }
     }
@@ -191,10 +203,11 @@ impl Register {
                             // maybe we only want to allow masks, when their width matches the
                             // expected width
 
-                            // TODO(robin): this also needs to account for little endian vs big endian
-                            // for value 0x12345678 at 0x0,
-                            // little endian has 0x78 is stored at 0x0, 0x56 is stored at 0x1 and so on
-                            // big endian has 0x12 stored at 0x0, 0x34 stored at 0x1 and so on
+                            // TODO(robin): this also needs to account for little endian vs big
+                            // endian for value 0x12345678 at 0x0,
+                            // little endian has 0x78 is stored at 0x0, 0x56 is stored at 0x1 and so
+                            // on big endian has 0x12 stored at 0x0,
+                            // 0x34 stored at 0x1 and so on
                             // need to define internal byte order =>
                             // little endian -- not so intuitive
                             // big endian -- would be more efficient and more intuitive
@@ -206,8 +219,7 @@ impl Register {
                                 value.push(0);
                             }
 
-                            let current_value = comm_channel
-                                .read_value(&self.address)?;
+                            let current_value = comm_channel.read_value(&self.address)?;
 
                             izip!(mask, value, current_value)
                                 .map(|(m, val, cur)| (val & m) | (cur & !m))
@@ -273,15 +285,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
             .map
             .registers
             .into_iter()
-            .map(|(name, reg)| {
-                (
-                    name,
-                    Register {
-                        comm_channel: Some(channel.clone()),
-                        ..reg
-                    },
-                )
-            })
+            .map(|(name, reg)| (name, Register { comm_channel: Some(channel.clone()), ..reg }))
             .collect::<HashMap<_, _>>();
 
         let map = RegisterSet { registers: registers.clone() };
@@ -290,7 +294,12 @@ impl<'de> Deserialize<'de> for RegisterSetting {
             .functions
             .into_iter()
             .map(|(name, func)| {
-                let addr = Address::parse_named(&func.addr, &registers).map_err(|_| D::Error::custom(format!("could not parse the address of this function ({})", func.addr)))?;
+                let addr = Address::parse_named(&func.addr, &registers).map_err(|_| {
+                    D::Error::custom(format!(
+                        "could not parse the address of this function ({})",
+                        func.addr
+                    ))
+                })?;
 
                 Ok((
                     name,
@@ -300,17 +309,13 @@ impl<'de> Deserialize<'de> for RegisterSetting {
                         desc: func.desc,
                         map: func.map,
                         default: func.default,
-                        writable: func.writable
+                        writable: func.writable,
                     },
                 ))
             })
             .collect::<Result<HashMap<String, Function>, _>>()?;
 
-        Ok(RegisterSetting {
-            channel,
-            map,
-            functions,
-        })
+        Ok(RegisterSetting { channel, map, functions })
     }
 }
 
@@ -358,11 +363,7 @@ impl Function {
         }
     }
 
-    fn write_value(
-        &self,
-        path: &mut dyn Iterator<Item = &str>,
-        value: Vec<u8>
-    ) -> Result<(), ()> {
+    fn write_value(&self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
         match path.next() {
             Some(_) => Err(()),
             None => {

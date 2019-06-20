@@ -1,4 +1,3 @@
-#![feature(extern_crate_item_prelude)]
 #![recursion_limit = "512"]
 
 extern crate proc_macro;
@@ -104,15 +103,14 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
         match &attr.interpret_meta() {
             Some(syn::Meta::List(syn::MetaList {
                 nested,
-                ident: _ident,
-                paren_token: _,
+                ..
             })) => {
                 for nested_meta in nested {
                     match nested_meta {
                         Meta(List(MetaList {
                             nested,
                             ident,
-                            paren_token: _,
+                            ..
                         })) => {
                             if ident == "virtual_field" {
                                 let mut name = None;
@@ -124,8 +122,8 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
                                     match nested_meta {
                                         Meta(NameValue(MetaNameValue {
                                             ident,
-                                            eq_token: _,
                                             lit,
+                                            ..
                                         })) => {
                                             if ident == "name" {
                                                 name = Some(lit_to_ident(lit))
@@ -296,7 +294,6 @@ fn impl_enum_variant(variant: &syn::Variant) -> (TokenStream, TokenStream, Token
             }
         }
         syn::Fields::Unit => impl_enum_variant_unit(&name),
-        _ => unimplemented!(),
     };
 
     let is_dir = quote! {
@@ -382,7 +379,7 @@ fn impl_enum_variant_flatten(
     (is_dir, read, write)
 }
 
-fn impl_enum_variant_namend(fields: &Vec<&syn::Field>) -> (TokenStream, TokenStream, TokenStream) {
+fn impl_enum_variant_namend(fields: &[&syn::Field]) -> (TokenStream, TokenStream, TokenStream) {
     let fields_is_dir: Vec<_> = fields
         .iter()
         .map(|f| {
@@ -450,8 +447,7 @@ fn parse_field(field: &&syn::Field) -> ParsedField {
         match &attr.interpret_meta() {
             Some(syn::Meta::List(syn::MetaList {
                 nested,
-                ident: _,
-                paren_token: _,
+                ..
             })) => match nested.iter().next() {
                 Some(syn::NestedMeta::Meta(syn::Meta::Word(ident))) => {
                     if ident == "skip" {
@@ -471,14 +467,14 @@ fn parse_field(field: &&syn::Field) -> ParsedField {
         }
     }
 
-    let field = ParsedField {
+    ParsedField {
         ident,
         skip,
         readable,
         writable,
-    };
+    }
     //    println!("parsed field {:#?}", field);
-    field
+
 }
 
 fn impl_fields(

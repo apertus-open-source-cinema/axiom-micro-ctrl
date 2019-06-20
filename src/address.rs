@@ -1,13 +1,11 @@
-use std::string::String;
-use std::collections::HashMap;
 use crate::sensor::Register;
-use serde_derive::Serialize;
-use lazy_static::lazy_static;
-use regex::Regex;
-use parse_num::parse_num_padded;
-use parse_num::parse_num;
+use fuseable::{Either, Fuseable};
 use fuseable_derive::Fuseable;
-use fuseable::{Fuseable, Either};
+use lazy_static::lazy_static;
+use parse_num::{parse_num, parse_num_padded};
+use regex::Regex;
+use serde_derive::Serialize;
+use std::{collections::HashMap, string::String};
 
 #[derive(Debug, PartialEq, Serialize, Fuseable, Clone)]
 pub struct Address {
@@ -17,11 +15,17 @@ pub struct Address {
 }
 
 impl Address {
-    fn parse_internal(str: &str, register_set: Option<&HashMap<String, Register>>, width: Option<u8>) -> Result<Address, ()> {
+    fn parse_internal(
+        str: &str,
+        register_set: Option<&HashMap<String, Register>>,
+        width: Option<u8>,
+    ) -> Result<Address, ()> {
         lazy_static! {
-            static ref RE: Regex = Regex::new(r#"^([^\[\]]+)(\[(?:([^\[\]]+)?:([^\[\]]+)?|([^:\[\]]+))\])?$"#).unwrap();
+            static ref RE: Regex =
+                Regex::new(r#"^([^\[\]]+)(\[(?:([^\[\]]+)?:([^\[\]]+)?|([^:\[\]]+))\])?$"#)
+                    .unwrap();
         }
-    
+
         match RE.captures(str) {
             Some(captures) => {
                 // capture 0 is the whole string
@@ -37,8 +41,7 @@ impl Address {
 
                                 let base = match base_reg {
                                     Some(reg) => reg.address.base.clone(),
-                                    None => base
-
+                                    None => base,
                                 };
 
                                 (base, base_reg)
@@ -56,8 +59,8 @@ impl Address {
                     } else if v.is_empty() {
                         0
                     } else {
-                        panic!("sorry slices longer than one u8 not supported (got {:?})", v); 
-                    } 
+                        panic!("sorry slices longer than one u8 not supported (got {:?})", v);
+                    }
                 }
 
                 // capture 5 is the potential single bit slice
@@ -67,6 +70,8 @@ impl Address {
                         let bit = parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?;
                         (bit, bit + 1)
                     }
+                    // if there is not single bit slice, we either have no slice, or a slice with
+                    // start and end
                     None => {
                         // capture 2 is the potential slice
                         // capture 3 is the potential slice start
@@ -74,29 +79,30 @@ impl Address {
                             Some(m) => {
                                 parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
                             }
+                            // no start was specified, so if we are a named register use the start
+                            // of that one
                             None => {
                                 match base_reg {
-                                    Some(r) => {
-                                        r.address.slice_start
-                                    }
-                                    None => {
-                                        0
-                                    }
+                                    Some(r) => r.address.slice_start,
+                                    // we are not a named register, so just use zero
+                                    None => 0,
                                 }
                             }
                         };
-    
+
                         // capture 4 is the potential slice end
                         let slice_end = match captures.get(4) {
                             Some(m) => {
                                 parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
                             }
                             None => {
+                                // again same as start
                                 match base_reg {
-                                    Some(r) => {
-                                        r.address.slice_end
-                                    }
+                                    Some(r) => r.address.slice_end,
                                     None => {
+                                        // however to get a sensible end, we need the width, as
+                                        // otherwise we have no clue how big the register actually
+                                        // is
                                         match width {
                                             Some(w) => {
                                                 // width is in bytes
@@ -110,18 +116,14 @@ impl Address {
                                 }
                             }
                         };
-                        
+
                         (slice_start, slice_end)
                     }
                 };
-    
-                Ok(Address {
-                    base,
-                    slice_start,
-                    slice_end
-                })
+
+                Ok(Address { base, slice_start, slice_end })
             }
-    
+
             None => {
                 panic!("could not parse address {}", str);
             }
@@ -138,14 +140,14 @@ impl Address {
 
     /*
     fn slice_value(&self, value: Vec<u8>) -> Vec<u8> {
-    
+
     }
-    
+
     */
 
     // TODO(robin): this could suffer from endianess fuckup
-    // TODO(robin): to fix this use byteorder crate and specify the byteorder of base
-    // byteorder of base should be big endian to match all the other stuff
+    // TODO(robin): to fix this use byteorder crate and specify the byteorder of
+    // base byteorder of base should be big endian to match all the other stuff
     pub fn as_u64(&self) -> u64 {
         assert!(self.base.len() < 9, "base should be no longer than 8 bytes");
 
@@ -176,43 +178,23 @@ mod tests {
     fn basic_address_test() {
         assert_eq!(
             Address::parse(&"0x1234[1]".to_string(), 2),
-            Ok(Address {
-                base: vec![0x12, 0x34],
-                slice_start: 1,
-                slice_end: 2,
-            })
+            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 2 })
         );
         assert_eq!(
             Address::parse(&"0x1234[:1]".to_string(), 2),
-            Ok(Address {
-                base: vec![0x12, 0x34],
-                slice_start: 0,
-                slice_end: 1
-            })
+            Ok(Address { base: vec![0x12, 0x34], slice_start: 0, slice_end: 1 })
         );
         assert_eq!(
             Address::parse(&"0x1234[1:]".to_string(), 2),
-            Ok(Address {
-                base: vec![0x12, 0x34],
-                slice_start: 1,
-                slice_end: 16
-            })
+            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 16 })
         );
         assert_eq!(
             Address::parse(&"0x1234[1:3]".to_string(), 2),
-            Ok(Address {
-                base: vec![0x12, 0x34],
-                slice_start: 1,
-                slice_end: 3,
-            })
+            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 3 })
         );
         assert_eq!(
             Address::parse(&"0x1234[0x1:0xa]".to_string(), 2),
-            Ok(Address {
-                base: vec![0x12, 0x34],
-                slice_start: 1,
-                slice_end: 10
-            })
+            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 10 })
         );
     }
 }

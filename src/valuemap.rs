@@ -1,5 +1,6 @@
 use byteorder::{BigEndian, ReadBytesExt};
-use fuseable::{Either, Fuseable};
+use failure::format_err;
+use fuseable::{Either, Fuseable, Result};
 use fuseable_derive::Fuseable;
 use isomorphism::BiMap;
 use parse_num::{parse_num, parse_num_padded, ParseError};
@@ -28,7 +29,7 @@ impl ToString for Value {
 impl FromStr for Value {
     type Err = ParseError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "Any" | "any" => Ok(Value::Any),
             _ => {
@@ -50,36 +51,40 @@ pub enum ValueMap {
 }
 
 impl ValueMap {
-    pub fn lookup(&self, v: Vec<u8>) -> Result<String, ()> {
+    pub fn lookup(&self, v: Vec<u8>) -> Result<String> {
         match self {
-            ValueMap::Keywords(map) => match map.get_left(&Value::Value(v)) {
+            ValueMap::Keywords(map) => match map.get_left(&Value::Value(v.clone())) {
                 Some(v) => Ok(v.clone()),
                 None => match map.get_left(&Value::Any) {
                     Some(v) => Ok(v.clone()),
-                    None => Err(()),
+                    None => Err(format_err!("could not find {:?} in valuemap {:?}", v, self)),
                 },
             },
-            ValueMap::Floating(map) => match map.get(&Value::Value(v)) {
+            ValueMap::Floating(map) => match map.get(&Value::Value(v.clone())) {
                 Some(v) => Ok(v.to_string()),
                 None => match map.get(&Value::Any) {
                     Some(v) => Ok(v.to_string()),
-                    None => Err(()),
+                    None => Err(format_err!("could not find {:?} in valuemap {:?}", v, self)),
                 },
             },
-            ValueMap::Fixed(map) => match map.get(&Value::Value(v)) {
+            ValueMap::Fixed(map) => match map.get(&Value::Value(v.clone())) {
                 Some(v) => Ok(v.to_string()),
                 None => match map.get(&Value::Any) {
                     Some(v) => Ok(v.to_string()),
-                    None => Err(()),
+                    None => Err(format_err!("could not find {:?} in valuemap {:?}", v, self)),
                 },
             },
         }
     }
 
-    pub fn encode(&self, s: String) -> Result<Vec<u8>, ()> {
+    pub fn encode(&self, s: String) -> Result<Vec<u8>> {
         match self {
             ValueMap::Keywords(map) => {
-                let v = map.get_right(&s).ok_or(())?;
+                let v = map.get_right(&s).ok_or(format_err!(
+                    "could not find {:?} in valuemap {:?}",
+                    s,
+                    self
+                ))?;
                 match v {
                     Value::Value(v) => Ok(v.clone()),
                     _ => {
@@ -107,7 +112,7 @@ impl ValueMap {
                 }
             }
             ValueMap::Floating(map) => {
-                let wanted_value: f64 = s.parse().map_err(|_| ())?;
+                let wanted_value: f64 = s.parse()?;
 
                 let (v, _) = map
                     .iter()
@@ -118,7 +123,7 @@ impl ValueMap {
                             Ordering::Greater
                         }
                     })
-                    .ok_or(())?;
+                    .ok_or(format_err!("could not find {:?} in valuemap {:?}", s, self))?;
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),
@@ -147,12 +152,14 @@ impl ValueMap {
                 }
             }
             ValueMap::Fixed(map) => {
-                let wanted_value: u64 = Cursor::new(parse_num(s).map_err(|_| ())?)
-                    .read_u64::<BigEndian>()
-                    .map_err(|_| ())?;
+                let wanted_value: u64 =
+                    Cursor::new(parse_num(s.clone())?).read_u64::<BigEndian>()?;
 
-
-                let (v, _) = map.iter().find(|(_, v)| **v == wanted_value).ok_or(())?;
+                let (v, _) = map.iter().find(|(_, v)| **v == wanted_value).ok_or(format_err!(
+                    "could not find {} in valuemap {:?}",
+                    s,
+                    self
+                ))?;
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),
@@ -184,7 +191,7 @@ impl ValueMap {
     }
 }
 
-pub fn deser_valuemap<'de, D>(deserializer: D) -> Result<Option<ValueMap>, D::Error>
+pub fn deser_valuemap<'de, D>(deserializer: D) -> std::result::Result<Option<ValueMap>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -228,7 +235,7 @@ where
 
     let (keys, values): (Vec<_>, Vec<_>) = map.into_iter().unzip();
 
-    let keys_as_numbers: Result<Vec<Value>, _> =
+    let keys_as_numbers: std::result::Result<Vec<Value>, _> =
         keys.iter()
             .map(|k| {
                 if k.trim() == "_" {
@@ -248,7 +255,7 @@ where
     // now to the values
     // first try u64, as they are the most specific (numbers without point)
     // then try f64, if nothing matches use String
-    let values_as_int: Result<Vec<u64>, ()> =
+    let values_as_int: std::result::Result<Vec<u64>, ()> =
         values.iter().map(|s| s.parse::<u64>().map_err(|_| ())).collect();
 
     fn build_hashmap<K: std::hash::Hash + std::cmp::Eq, V>(

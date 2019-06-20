@@ -1,6 +1,7 @@
 #![feature(inner_deref)]
 
 use crate::{sensor::Sensor, serde_util::FILE_OPENER};
+use env_logger;
 use fuseable::FuseableWrapper;
 use std::{ffi::OsStr, io::Read, path::PathBuf};
 use structopt::StructOpt;
@@ -28,6 +29,8 @@ struct Opt {
 }
 
 fn main() {
+    env_logger::init();
+
     let opt = Opt::from_args();
 
     let mut f = FILE_OPENER.open(&opt.file).unwrap();

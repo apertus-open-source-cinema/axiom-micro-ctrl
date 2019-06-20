@@ -5,6 +5,8 @@ authors = ["Robin Ole Heinemann <robin.ole.heinemann@t-online.de>"]
 edition = "2018"
 
 [dependencies]
+env_logger = "*"
+failure = "*"
 derivative = "*"
 fuse_mt = "*"
 fuseable = { path = "fuseable", features = ["bimap"] }

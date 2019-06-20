@@ -9,6 +9,8 @@ default = []
 bimap = ["isomorphism"]
 
 [dependencies]
+log = "*"
+failure = "*"
 fuse_mt = "*"
 itertools = "*"
 lru = "*"

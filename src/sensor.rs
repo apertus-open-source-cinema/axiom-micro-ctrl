@@ -4,7 +4,8 @@ use crate::{
     serde_util::{bool_false, by_path},
     valuemap::*,
 };
-use fuseable::{Either, Fuseable};
+use failure::format_err;
+use fuseable::{type_name, Either, Fuseable, FuseableError};
 use fuseable_derive::Fuseable;
 use itertools::izip;
 use num::Num;
@@ -164,9 +165,9 @@ impl Register {
     fn read_value(
         &self,
         path: &mut dyn Iterator<Item = &str>,
-    ) -> Result<Either<Vec<String>, String>, ()> {
+    ) -> fuseable::Result<Either<Vec<String>, String>> {
         match path.next() {
-            Some(_) => Err(()),
+            Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
                 let comm_channel = self.comm_channel.clone().unwrap();
                 let comm_channel = comm_channel.lock().unwrap();
@@ -176,9 +177,13 @@ impl Register {
         }
     }
 
-    fn write_value(&self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write_value(
+        &self,
+        path: &mut dyn Iterator<Item = &str>,
+        value: Vec<u8>,
+    ) -> fuseable::Result<()> {
         match path.next() {
-            Some(_) => Err(()),
+            Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
                 let comm_channel = self.comm_channel.clone().unwrap();
                 let comm_channel = comm_channel.lock().unwrap();
@@ -186,11 +191,10 @@ impl Register {
                 println!("writing");
 
                 if let Some(width) = self.width {
-                    let (mask, mut value) =
-                        parse_num_mask(String::from_utf8_lossy(&value)).map_err(|_| ())?;
+                    let (mask, mut value) = parse_num_mask(String::from_utf8_lossy(&value))?;
 
                     if value.len() > width as usize {
-                        return Err(());
+                        return Err(format_err!("value {:?} to write was longer ({}) than register {:?} with width of {}", value, value.len(), self, width));
                     }
 
                     let value = match mask {
@@ -230,7 +234,7 @@ impl Register {
 
                     comm_channel.write_value(&self.address, value)
                 } else {
-                    Err(())
+                    Err(format_err!("the register written to {:?} did not specify a width, don't know what to do", self))
                 }
             }
         }
@@ -348,11 +352,19 @@ impl Function {
     fn read_value(
         &self,
         path: &mut dyn Iterator<Item = &str>,
-    ) -> Result<Either<Vec<String>, String>, ()> {
+    ) -> fuseable::Result<Either<Vec<String>, String>> {
         match path.next() {
-            Some(_) => Err(()),
+            Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
+                let channel = self
+                    .channel
+                    .deref()
+                    .ok_or(format_err!(
+                        "could not deref communication channel of function {:?}",
+                        self
+                    ))?
+                    .lock()
+                    .unwrap();
                 let value = channel.read_value(&self.addr)?;
 
                 match &self.map {
@@ -363,14 +375,26 @@ impl Function {
         }
     }
 
-    fn write_value(&self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<(), ()> {
+    fn write_value(
+        &self,
+        path: &mut dyn Iterator<Item = &str>,
+        value: Vec<u8>,
+    ) -> fuseable::Result<()> {
         match path.next() {
-            Some(_) => Err(()),
+            Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let channel = self.channel.deref().ok_or(())?.lock().map_err(|_| ())?;
+                let channel = self
+                    .channel
+                    .deref()
+                    .ok_or(format_err!(
+                        "could not deref communication channel of function {:?}",
+                        self
+                    ))?
+                    .lock()
+                    .unwrap();
 
                 let value = match &self.map {
-                    Some(map) => map.encode(String::from_utf8(value).map_err(|_| ())?)?,
+                    Some(map) => map.encode(String::from_utf8(value)?)?,
                     None => value,
                 };
 

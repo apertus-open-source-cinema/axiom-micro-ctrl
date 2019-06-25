@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 env_logger = "*"
+log = "*"
 failure = "*"
 derivative = "*"
 fuse_mt = "*"
@@ -32,3 +33,7 @@ regex = "*"
 codegen-units = 16
 lto = true
 panic = 'abort'
+
+
+[dev-dependencies]
+pretty_assertions = "*"

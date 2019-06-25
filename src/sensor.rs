@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for Register {
 
         let reg = RegisterStringAddr::deserialize(deserializer)?;
 
-        let address = Address::parse(&reg.address, reg.width.unwrap_or(1) as usize)
+        let address = Address::parse(&reg.address, reg.width.map(|v| v as usize))
             .map_err(|_| D::Error::custom("error parsing address"))?;
 
         Ok(Register {

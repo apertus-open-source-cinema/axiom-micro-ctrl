@@ -7,6 +7,7 @@ use parse_num::{parse_num, parse_num_padded, ParseError};
 use serde::*;
 use serde_derive::*;
 use std::{cmp::Ordering, collections::HashMap, io::Cursor, str::FromStr};
+use ::log::{trace, log};
 
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
 pub enum Value {
@@ -33,9 +34,9 @@ impl FromStr for Value {
         match s {
             "Any" | "any" => Ok(Value::Any),
             _ => {
-                println!("got {}", s);
+                trace!("got {}", s);
                 let v = parse_num_padded(s).map(Value::Value);
-                println!("parsed {:?}", v);
+                trace!("parsed {:?}", v);
                 v
             }
         }

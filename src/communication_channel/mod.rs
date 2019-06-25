@@ -1,4 +1,4 @@
-use crate::address::Address;
+use crate::address::{ Address, Slice };
 use core::fmt::Debug;
 use derivative::*;
 use failure::format_err;
@@ -11,20 +11,23 @@ use serde::*;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs::OpenOptions, sync::RwLock};
 
+use crate::bit_slice::{slice, slice_write};
+
 pub type CommunicationChannel = Box<dyn CommChannel>;
 
 pub trait CommChannel: Debug + Fuseable {
+    // these are assumed to be bytewise
     fn read_value_real(&self, address: &Address) -> Result<Vec<u8>>;
     fn write_value_real(&self, address: &Address, value: Vec<u8>) -> Result<()>;
 
     fn read_value_mock(&self, address: &Address) -> Result<Vec<u8>> {
         println!(
-            "MOCK READ {:?} bits at {:?} by {:?}",
-            address.slice_end - address.slice_start,
+            "MOCK READ {:?} bytes at {:?} by {:?}",
+            address.bytes(),
             address,
             self
         );
-        Ok(vec![])
+        Ok(vec![0; address.bytes().unwrap_or(0)])
     }
 
     fn write_value_mock(&self, address: &Address, value: Vec<u8>) -> Result<()> {
@@ -36,18 +39,33 @@ pub trait CommChannel: Debug + Fuseable {
     fn get_mock_mode(&self) -> bool;
 
     fn read_value(&self, address: &Address) -> Result<Vec<u8>> {
-        if self.get_mock_mode() {
+        let v = if self.get_mock_mode() {
             self.read_value_mock(&address)
         } else {
             self.read_value_real(&address)
-        }
+        };
+
+        v.map(|v| slice(v, address))
     }
 
     fn write_value(&self, address: &Address, value: Vec<u8>) -> Result<()> {
-        if self.get_mock_mode() {
-            self.write_value_mock(&address, value)
+        let new_value = if address.nontrivial_slice() {
+            let mut old_value = self.read_value(address)?;
+
+            slice_write(&mut old_value, value, address);
+
+            old_value
+        } else if !address.unbounded() { // the slice starts and ends at a byte boundary and is not unbounded
+            let Slice { start, end } = address.slice.as_ref().unwrap();
+            value[(start >> 3) as usize..(end >> 3) as usize].to_vec()
         } else {
-            self.write_value_real(&address, value)
+            value
+        };
+
+        if self.get_mock_mode() {
+            self.write_value_mock(&address, new_value)
+        } else {
+            self.write_value_real(&address, new_value)
         }
     }
 }
@@ -107,7 +125,7 @@ impl CommChannel for I2CCdev {
             &self.dev,
             |i2c_dev| {
                 i2c_dev.write(&address.base)?;
-                let mut ret = vec![0; address.bytes()];
+                let mut ret = vec![0; address.bytes().ok_or(format_err!("I2CCdev doesn't support unbounded read"))?];
                 i2c_dev.read(&mut ret)?;
                 Ok(ret)
             },
@@ -135,11 +153,13 @@ impl CommChannel for MMAPGPIO {
         with_dev(
             &self.dev,
             |mmap_dev| {
-                mmap_dev.get(offset..(offset + address.bytes())).map(|v| v.to_vec()).ok_or(
+                let bytes = address.bytes().ok_or(format_err!("MMAPGPIO doesn't support unbounded read"))?;
+
+                mmap_dev.get(offset..(offset + bytes)).map(|v| v.to_vec()).ok_or(
                     format_err!(
                         "could not read region {} to {} at {} of /dev/mem",
                         offset,
-                        offset + address.bytes(),
+                        offset + bytes,
                         self.base
                     ),
                 )

@@ -1,3 +1,4 @@
+use failure::Error;
 use crate::sensor::Register;
 use fuseable::{Either, Fuseable};
 use fuseable_derive::Fuseable;
@@ -8,10 +9,19 @@ use serde_derive::Serialize;
 use std::{collections::HashMap, string::String};
 
 #[derive(Debug, PartialEq, Serialize, Fuseable, Clone)]
+pub struct Slice {
+    pub start: u8,
+    pub end: u8
+}
+
+// base contains the base address (in big endian bytes)
+// if slice is Some it specifies the start and stop bit of this Address
+// if slice is None, reads shall read from bit 0 until EOF
+// and writes shall write starting from bit 0 and write the whole value
+#[derive(Debug, PartialEq, Serialize, Fuseable, Clone)]
 pub struct Address {
     pub base: Vec<u8>,
-    pub slice_start: u8,
-    pub slice_end: u8,
+    pub slice: Option<Slice>,
 }
 
 impl Address {
@@ -19,7 +29,7 @@ impl Address {
         str: &str,
         register_set: Option<&HashMap<String, Register>>,
         width: Option<u8>,
-    ) -> Result<Address, ()> {
+    ) -> Result<Address, Error> {
         lazy_static! {
             static ref RE: Regex =
                 Regex::new(r#"^([^\[\]]+)(\[(?:([^\[\]]+)?:([^\[\]]+)?|([^:\[\]]+))\])?$"#)
@@ -67,8 +77,8 @@ impl Address {
                 //
                 let (slice_start, slice_end) = match captures.get(5) {
                     Some(m) => {
-                        let bit = parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?;
-                        (bit, bit + 1)
+                        let bit = parse_num(m.as_str()).map(parse_slice_num)?;
+                        (Some(bit), Some(bit + 1))
                     }
                     // if there is not single bit slice, we either have no slice, or a slice with
                     // start and end
@@ -77,15 +87,15 @@ impl Address {
                         // capture 3 is the potential slice start
                         let slice_start = match captures.get(3) {
                             Some(m) => {
-                                parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
+                                Some(parse_num(m.as_str()).map(parse_slice_num)?)
                             }
                             // no start was specified, so if we are a named register use the start
                             // of that one
                             None => {
                                 match base_reg {
-                                    Some(r) => r.address.slice_start,
+                                    Some(r) => r.address.slice.as_ref().map(|s| s.start),
                                     // we are not a named register, so just use zero
-                                    None => 0,
+                                    None => Some(0),
                                 }
                             }
                         };
@@ -93,26 +103,16 @@ impl Address {
                         // capture 4 is the potential slice end
                         let slice_end = match captures.get(4) {
                             Some(m) => {
-                                parse_num(m.as_str()).map(parse_slice_num).map_err(|_| ())?
+                                Some(parse_num(m.as_str()).map(parse_slice_num)?)
                             }
                             None => {
                                 // again same as start
                                 match base_reg {
-                                    Some(r) => r.address.slice_end,
-                                    None => {
-                                        // however to get a sensible end, we need the width, as
-                                        // otherwise we have no clue how big the register actually
-                                        // is
-                                        match width {
-                                            Some(w) => {
-                                                // width is in bytes
-                                                slice_start + w * 8 - 1
-                                            }
-                                            None => {
-                                                panic!("address did not specify an end of the slice and neither width nor base register are available ({})", str)
-                                            }
-                                        }
-                                    }
+                                    Some(r) => r.address.slice.as_ref().map(|s| s.end),
+                                    // however to get a sensible end, we need the width, as
+                                    // otherwise we have no clue how big the register actually
+                                    // is, and thus produce a unbounded address
+                                    None => width.map(|w| w * 8)
                                 }
                             }
                         };
@@ -121,7 +121,16 @@ impl Address {
                     }
                 };
 
-                Ok(Address { base, slice_start, slice_end })
+                let slice = slice_end.map(|end| {
+                    let start = match slice_start {
+                        Some(s) => s,
+                        None => 0
+                    };
+
+                    Slice { start, end }
+                });
+
+                Ok(Address { base, slice })
             }
 
             None => {
@@ -130,12 +139,12 @@ impl Address {
         }
     }
 
-    pub fn parse_named(address: &str, regs: &HashMap<String, Register>) -> Result<Address, ()> {
+    pub fn parse_named(address: &str, regs: &HashMap<String, Register>) -> Result<Address, Error> {
         Address::parse_internal(address, Some(regs), None)
     }
 
-    pub fn parse(address: &str, amount: usize) -> Result<Address, ()> {
-        Address::parse_internal(address, None, Some(amount as u8))
+    pub fn parse(address: &str, amount: Option<usize>) -> Result<Address, Error> {
+        Address::parse_internal(address, None, amount.map(|v| v as u8))
     }
 
     /*
@@ -161,40 +170,85 @@ impl Address {
         base
     }
 
-    pub fn bytes(&self) -> usize {
-        let bits = self.slice_end - self.slice_start;
-        let extra_byte = if bits % 8 > 0 { 1 } else { 0 };
+    // bytes from base to the end
+    pub fn bytes(&self) -> Option<usize> {
+        self.slice.as_ref().map(|s| {
+            let bits = s.end; //  - self.slice_start;
+            let extra_byte = if bits % 8 > 0 { 1 } else { 0 };
 
 
-        (extra_byte + (bits >> 3)) as usize
+            (extra_byte + (bits >> 3)) as usize
+        })
+    }
+
+    // the slice is nontrivial if it doesn't start and end at a byte boundary
+    pub fn nontrivial_slice(&self) -> bool {
+        match self.slice {
+            Some(Slice {start, end}) => {
+                ((start % 8) == 0) && ((end % 8) == 0)
+            }
+            None => true
+        }
+
+    }
+
+    pub fn unbounded(&self) -> bool {
+        self.slice.is_none()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn basic_address_test() {
         assert_eq!(
-            Address::parse(&"0x1234[1]".to_string(), 2),
-            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 2 })
+            Address::parse(&"0x1234[1]".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 1, end: 2 }) })
         );
         assert_eq!(
-            Address::parse(&"0x1234[:1]".to_string(), 2),
-            Ok(Address { base: vec![0x12, 0x34], slice_start: 0, slice_end: 1 })
+            Address::parse(&"0x1234[:1]".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 0, end: 1 }) })
         );
         assert_eq!(
-            Address::parse(&"0x1234[1:]".to_string(), 2),
-            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 16 })
+            Address::parse(&"0x1234[1:]".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 1, end: 16 }) })
         );
         assert_eq!(
-            Address::parse(&"0x1234[1:3]".to_string(), 2),
-            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 3 })
+            Address::parse(&"0x1234[1:3]".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 1, end: 3 }) })
         );
         assert_eq!(
-            Address::parse(&"0x1234[0x1:0xa]".to_string(), 2),
-            Ok(Address { base: vec![0x12, 0x34], slice_start: 1, slice_end: 10 })
+            Address::parse(&"0x1234[0x1:0xa]".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 1, end: 10 }) })
+        );
+        assert_eq!(
+            Address::parse(&"0x1234".to_string(), Some(2)).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: Some(Slice { start: 0, end: 16 }) })
+        );
+        assert_eq!(
+            Address::parse(&"0x1234".to_string(), None).map_err(|_| ()),
+            Ok(Address { base: vec![0x12, 0x34], slice: None })
+        );
+
+        let s = "/sys/class/fpga/fpga_manager0/firmware".to_string();
+        assert_eq!(
+            Address::parse(&s, Some(2)).map_err(|_| ()),
+            Ok(Address { base: s.bytes().collect(), slice: Some(Slice { start: 0, end: 16 }) })
+        );
+
+        let s_slice = "/sys/class/fpga/fpga_manager0/firmware[:217]".to_string();
+        assert_eq!(
+            Address::parse(&s_slice, Some(2)).map_err(|_| ()),
+            Ok(Address { base: s.bytes().collect(), slice: Some(Slice { start: 0, end: 217 }) })
+        );
+
+        let s = "/sys/class/fpga/fpga_manager0/firmware".to_string();
+        assert_eq!(
+            Address::parse(&s, None).map_err(|_| ()),
+            Ok(Address { base: s.bytes().collect(), slice: None })
         );
     }
 }

@@ -40,4 +40,5 @@ where
 
 pub fn bool_false() -> bool { false }
 
+#[allow(dead_code)]
 pub fn bool_true() -> bool { true }

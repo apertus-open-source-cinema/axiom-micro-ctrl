@@ -1,4 +1,4 @@
-use crate::address::{ Address, Slice };
+use crate::address::{Address, Slice};
 use core::fmt::Debug;
 use derivative::*;
 use failure::format_err;
@@ -21,12 +21,7 @@ pub trait CommChannel: Debug + Fuseable {
     fn write_value_real(&self, address: &Address, value: Vec<u8>) -> Result<()>;
 
     fn read_value_mock(&self, address: &Address) -> Result<Vec<u8>> {
-        println!(
-            "MOCK READ {:?} bytes at {:?} by {:?}",
-            address.bytes(),
-            address,
-            self
-        );
+        println!("MOCK READ {:?} bytes at {:?} by {:?}", address.bytes(), address, self);
         Ok(vec![0; address.bytes().unwrap_or(0)])
     }
 
@@ -55,7 +50,8 @@ pub trait CommChannel: Debug + Fuseable {
             slice_write(&mut old_value, value, address);
 
             old_value
-        } else if !address.unbounded() { // the slice starts and ends at a byte boundary and is not unbounded
+        } else if !address.unbounded() {
+            // the slice starts and ends at a byte boundary and is not unbounded
             let Slice { start, end } = address.slice.as_ref().unwrap();
             value[(start >> 3) as usize..(end >> 3) as usize].to_vec()
         } else {
@@ -125,7 +121,12 @@ impl CommChannel for I2CCdev {
             &self.dev,
             |i2c_dev| {
                 i2c_dev.write(&address.base)?;
-                let mut ret = vec![0; address.bytes().ok_or(format_err!("I2CCdev doesn't support unbounded read"))?];
+                let mut ret = vec![
+                    0;
+                    address.bytes().ok_or_else(|| format_err!(
+                        "I2CCdev doesn't support unbounded read"
+                    ))?
+                ];
                 i2c_dev.read(&mut ret)?;
                 Ok(ret)
             },
@@ -153,16 +154,18 @@ impl CommChannel for MMAPGPIO {
         with_dev(
             &self.dev,
             |mmap_dev| {
-                let bytes = address.bytes().ok_or(format_err!("MMAPGPIO doesn't support unbounded read"))?;
+                let bytes = address
+                    .bytes()
+                    .ok_or_else(|| format_err!("MMAPGPIO doesn't support unbounded read"))?;
 
-                mmap_dev.get(offset..(offset + bytes)).map(|v| v.to_vec()).ok_or(
+                mmap_dev.get(offset..(offset + bytes)).map(|v| v.to_vec()).ok_or_else(|| {
                     format_err!(
                         "could not read region {} to {} at {} of /dev/mem",
                         offset,
                         offset + bytes,
                         self.base
-                    ),
-                )
+                    )
+                })
             },
             || self.init(),
         )

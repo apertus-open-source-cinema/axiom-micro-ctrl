@@ -114,54 +114,50 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
     }
 
     for attr in &attrs {
-        match &attr.interpret_meta() {
-            Some(syn::Meta::List(syn::MetaList { nested, .. })) => {
-                for nested_meta in nested {
-                    match nested_meta {
-                        Meta(List(MetaList { nested, ident, .. })) => {
-                            if ident == "virtual_field" {
-                                let mut name = None;
-                                let mut is_dir = None;
-                                let mut read = None;
-                                let mut write = None;
+        if let Some(syn::Meta::List(syn::MetaList { nested, .. })) = &attr.interpret_meta() {
+            for nested_meta in nested {
+                match nested_meta {
+                    Meta(List(MetaList { nested, ident, .. })) => {
+                        if ident == "virtual_field" {
+                            let mut name = None;
+                            let mut is_dir = None;
+                            let mut read = None;
+                            let mut write = None;
 
-                                for nested_meta in nested {
-                                    match nested_meta {
-                                        Meta(NameValue(MetaNameValue { ident, lit, .. })) => {
-                                            if ident == "name" {
-                                                name = Some(lit_to_ident(lit))
-                                            } else if ident == "is_dir" {
-                                                is_dir = Some(lit_to_token_stream(lit))
-                                            } else if ident == "read" {
-                                                read = Some(lit_to_token_stream(lit))
-                                            } else if ident == "write" {
-                                                write = Some(lit_to_token_stream(lit))
-                                            }
-                                        }
-                                        _ => {}
+                            for nested_meta in nested {
+                                if let Meta(NameValue(MetaNameValue { ident, lit, .. })) =
+                                    nested_meta
+                                {
+                                    if ident == "name" {
+                                        name = Some(lit_to_ident(lit))
+                                    } else if ident == "is_dir" {
+                                        is_dir = Some(lit_to_token_stream(lit))
+                                    } else if ident == "read" {
+                                        read = Some(lit_to_token_stream(lit))
+                                    } else if ident == "write" {
+                                        write = Some(lit_to_token_stream(lit))
                                     }
                                 }
-
-                                let name = name.unwrap();
-                                let is_dir = is_dir.unwrap();
-                                let read = read.unwrap();
-                                let write = write.unwrap();
-
-                                let is_dir = match syn::parse2::<syn::LitBool>(is_dir.clone()) {
-                                    Ok(lit) => IsDirImpl::Static(lit),
-                                    Err(_) => IsDirImpl::FunctionCall(is_dir),
-                                };
-
-                                virtual_fields.push(VirtualField { name, is_dir, read, write });
-                            } else {
-                                panic!("unhandled meta {:?}", attrs)
                             }
+
+                            let name = name.unwrap();
+                            let is_dir = is_dir.unwrap();
+                            let read = read.unwrap();
+                            let write = write.unwrap();
+
+                            let is_dir = match syn::parse2::<syn::LitBool>(is_dir.clone()) {
+                                Ok(lit) => IsDirImpl::Static(lit),
+                                Err(_) => IsDirImpl::FunctionCall(is_dir),
+                            };
+
+                            virtual_fields.push(VirtualField { name, is_dir, read, write });
+                        } else {
+                            panic!("unhandled meta {:?}", attrs)
                         }
-                        _ => panic!("unhandled meta {:?}", nested_meta),
                     }
+                    _ => panic!("unhandled meta {:?}", nested_meta),
                 }
             }
-            _ => {}
         }
     }
 
@@ -180,7 +176,7 @@ fn impl_body(ast: &syn::DeriveInput) -> (TokenStream, TokenStream, TokenStream) 
     match ast.data {
         Struct(ref data) => impl_struct(data, &virtual_fields),
         Enum(ref data) => {
-            if virtual_fields.len() > 0 {
+            if !virtual_fields.is_empty() {
                 panic!("cannot handle virtual fields in enums yet");
             }
 
@@ -440,23 +436,19 @@ fn parse_field(field: &&syn::Field) -> ParsedField {
     let mut readable = true;
 
     for attr in attrs {
-        match &attr.interpret_meta() {
-            Some(syn::Meta::List(syn::MetaList { nested, .. })) => match nested.iter().next() {
-                Some(syn::NestedMeta::Meta(syn::Meta::Word(ident))) => {
-                    if ident == "skip" {
-                        skip = true;
-                    } else if ident == "ro" {
-                        writable = false;
-                    } else if ident == "wo" {
-                        readable = false;
-                    } else if ident == "rw" {
-                        readable = true;
-                        writable = true;
-                    }
+        if let Some(syn::Meta::List(syn::MetaList { nested, .. })) = &attr.interpret_meta() {
+            if let Some(syn::NestedMeta::Meta(syn::Meta::Word(ident))) = nested.iter().next() {
+                if ident == "skip" {
+                    skip = true;
+                } else if ident == "ro" {
+                    writable = false;
+                } else if ident == "wo" {
+                    readable = false;
+                } else if ident == "rw" {
+                    readable = true;
+                    writable = true;
                 }
-                _ => {}
-            },
-            _ => {}
+            }
         }
     }
 

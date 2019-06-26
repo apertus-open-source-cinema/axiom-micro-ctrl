@@ -39,42 +39,36 @@ pub fn slice(mut v: Vec<u8>, address: &Address) -> Vec<u8> {
             let lower_half = v[i] >> bit_offset;
 
             // we cross a byte boundary, so fetch the value from the next byte
-            let upper_half = if bit_offset + end_bits > 8 {
-                v[i + 1] << (8 - bit_offset)
-            } else {
-                0
-            };
+            let upper_half =
+                if bit_offset + end_bits > 8 { v[i + 1] << (8 - bit_offset) } else { 0 };
 
             v[write_idx] = (lower_half | upper_half) & (0xff >> (8 - end_bits));
 
             v.truncate(write_idx + 1);
 
             v
-
         }
     }
-
 }
 
 // write bit from val to cur where m is set
-fn masked_write(val: u8, cur: u8, m: u8) -> u8 {
-    (val & m) | (cur & !m)
-}
+fn masked_write(val: u8, cur: u8, m: u8) -> u8 { (val & m) | (cur & !m) }
 
 // this ugly casting is because 0xffu8 << 8 is counted as a overflow :(
-fn shift_left_with_overflow(val: u8, shift: u8) -> u8 {
-    (((val as u32) << shift) & 0xff) as u8
-}
+fn shift_left_with_overflow(val: u8, shift: u8) -> u8 { ((u32::from(val) << shift) & 0xff) as u8 }
 
 fn shift_right_with_overflow(val: u8, shift: usize) -> u8 {
-    (((val as u32) >> shift) & 0xff) as u8
+    ((u32::from(val) >> shift) & 0xff) as u8
 }
 
 // write the contents of value to dest
 // starting from address.slice_start
 // stopping at address.slice_end bits
 pub fn slice_write(dest: &mut [u8], value: Vec<u8>, address: &Address) {
-    assert!(address.slice.is_some(), "slice_write doesn't do anything if address doesn't contain a slice");
+    assert!(
+        address.slice.is_some(),
+        "slice_write doesn't do anything if address doesn't contain a slice"
+    );
 
     match address.slice {
         None => (),
@@ -123,14 +117,16 @@ pub fn slice_write(dest: &mut [u8], value: Vec<u8>, address: &Address) {
 
                 dest[i + 1] = masked_write(upper_half, dest[i + 1], upper_mask);
             };
-
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{bit_slice::slice_write, address::{Address, Slice}};
+    use crate::{
+        address::{Address, Slice},
+        bit_slice::slice_write,
+    };
 
     #[test]
     fn dummy_test() {
@@ -138,7 +134,8 @@ mod tests {
 
         for start in 1u8..17 {
             for i in start..25 {
-                let address = Address { base: vec![], slice: Some(Slice{ start: i - start, end: i }) };
+                let address =
+                    Address { base: vec![], slice: Some(Slice { start: i - start, end: i }) };
 
                 let v = &mut v.clone();
 

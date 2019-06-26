@@ -6,8 +6,8 @@ use fuseable::FuseableWrapper;
 use std::{ffi::OsStr, io::Read, path::PathBuf};
 use structopt::StructOpt;
 
-mod bit_slice;
 mod address;
+mod bit_slice;
 mod communication_channel;
 mod sensor;
 mod serde_util;

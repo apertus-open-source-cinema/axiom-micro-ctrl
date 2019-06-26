@@ -5,7 +5,7 @@ use crate::{
     valuemap::*,
 };
 use failure::format_err;
-use fuseable::{type_name, Either, Fuseable, FuseableError};
+use fuseable::{type_name, Either, FuseableError};
 use fuseable_derive::Fuseable;
 use itertools::izip;
 use num::Num;
@@ -359,10 +359,9 @@ impl Function {
                 let channel = self
                     .channel
                     .deref()
-                    .ok_or(format_err!(
-                        "could not deref communication channel of function {:?}",
-                        self
-                    ))?
+                    .ok_or_else(|| {
+                        format_err!("could not deref communication channel of function {:?}", self)
+                    })?
                     .lock()
                     .unwrap();
                 let value = channel.read_value(&self.addr)?;
@@ -386,10 +385,9 @@ impl Function {
                 let channel = self
                     .channel
                     .deref()
-                    .ok_or(format_err!(
-                        "could not deref communication channel of function {:?}",
-                        self
-                    ))?
+                    .ok_or_else(|| {
+                        format_err!("could not deref communication channel of function {:?}", self)
+                    })?
                     .lock()
                     .unwrap();
 

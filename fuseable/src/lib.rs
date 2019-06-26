@@ -127,7 +127,9 @@ impl<T: Fuseable> Fuseable for Vec<T> {
             Some(idx) => {
                 let idx = idx.parse::<usize>()?;
 
-                let v = self.get(idx).ok_or(FuseableError::index_out_of_bounds(idx, self.len()))?;
+                let v = self
+                    .get(idx)
+                    .ok_or_else(|| FuseableError::index_out_of_bounds(idx, self.len()))?;
 
                 Fuseable::is_dir(v, path)
             }
@@ -140,7 +142,9 @@ impl<T: Fuseable> Fuseable for Vec<T> {
             Some(idx) => {
                 let idx = idx.parse::<usize>()?;
 
-                let v = self.get(idx).ok_or(FuseableError::index_out_of_bounds(idx, self.len()))?;
+                let v = self
+                    .get(idx)
+                    .ok_or_else(|| FuseableError::index_out_of_bounds(idx, self.len()))?;
 
                 Fuseable::read(v, path)
             }
@@ -154,7 +158,9 @@ impl<T: Fuseable> Fuseable for Vec<T> {
                 let idx = idx.parse::<usize>()?;
 
                 let len = self.len();
-                let v = self.get_mut(idx).ok_or(FuseableError::index_out_of_bounds(idx, len))?;
+                let v = self
+                    .get_mut(idx)
+                    .ok_or_else(|| FuseableError::index_out_of_bounds(idx, len))?;
 
                 Fuseable::write(v, path, value)
             }
@@ -365,7 +371,7 @@ where
             Some(name) => {
                 let parsed_name = name.parse()?;
                 let mut right =
-                    self.remove_left(&parsed_name).ok_or(FuseableError::not_found(name))?;
+                    self.remove_left(&parsed_name).ok_or_else(|| FuseableError::not_found(name))?;
                 let ret = Fuseable::write(&mut right, path, value);
                 self.insert(parsed_name, right);
 

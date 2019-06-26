@@ -1,6 +1,6 @@
-use failure::Error;
 use crate::sensor::Register;
-use fuseable::{Either, Fuseable};
+use failure::Error;
+use fuseable::Either;
 use fuseable_derive::Fuseable;
 use lazy_static::lazy_static;
 use parse_num::{parse_num, parse_num_padded};
@@ -11,7 +11,7 @@ use std::{collections::HashMap, string::String};
 #[derive(Debug, PartialEq, Serialize, Fuseable, Clone)]
 pub struct Slice {
     pub start: u8,
-    pub end: u8
+    pub end: u8,
 }
 
 // base contains the base address (in big endian bytes)
@@ -86,9 +86,7 @@ impl Address {
                         // capture 2 is the potential slice
                         // capture 3 is the potential slice start
                         let slice_start = match captures.get(3) {
-                            Some(m) => {
-                                Some(parse_num(m.as_str()).map(parse_slice_num)?)
-                            }
+                            Some(m) => Some(parse_num(m.as_str()).map(parse_slice_num)?),
                             // no start was specified, so if we are a named register use the start
                             // of that one
                             None => {
@@ -102,9 +100,7 @@ impl Address {
 
                         // capture 4 is the potential slice end
                         let slice_end = match captures.get(4) {
-                            Some(m) => {
-                                Some(parse_num(m.as_str()).map(parse_slice_num)?)
-                            }
+                            Some(m) => Some(parse_num(m.as_str()).map(parse_slice_num)?),
                             None => {
                                 // again same as start
                                 match base_reg {
@@ -112,7 +108,7 @@ impl Address {
                                     // however to get a sensible end, we need the width, as
                                     // otherwise we have no clue how big the register actually
                                     // is, and thus produce a unbounded address
-                                    None => width.map(|w| w * 8)
+                                    None => width.map(|w| w * 8),
                                 }
                             }
                         };
@@ -124,7 +120,7 @@ impl Address {
                 let slice = slice_end.map(|end| {
                     let start = match slice_start {
                         Some(s) => s,
-                        None => 0
+                        None => 0,
                     };
 
                     Slice { start, end }
@@ -173,7 +169,8 @@ impl Address {
     // bytes from base to the end
     pub fn bytes(&self) -> Option<usize> {
         self.slice.as_ref().map(|s| {
-            let bits = s.end; //  - self.slice_start;
+            let bits = s.end; // 
+                              //  - self.slice_start;
             let extra_byte = if bits % 8 > 0 { 1 } else { 0 };
 
 
@@ -184,17 +181,12 @@ impl Address {
     // the slice is nontrivial if it doesn't start and end at a byte boundary
     pub fn nontrivial_slice(&self) -> bool {
         match self.slice {
-            Some(Slice {start, end}) => {
-                ((start % 8) == 0) && ((end % 8) == 0)
-            }
-            None => true
+            Some(Slice { start, end }) => ((start % 8) == 0) && ((end % 8) == 0),
+            None => true,
         }
-
     }
 
-    pub fn unbounded(&self) -> bool {
-        self.slice.is_none()
-    }
+    pub fn unbounded(&self) -> bool { self.slice.is_none() }
 }
 
 #[cfg(test)]

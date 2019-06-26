@@ -1,13 +1,13 @@
+use ::log::trace;
 use byteorder::{BigEndian, ReadBytesExt};
 use failure::format_err;
-use fuseable::{Either, Fuseable, Result};
+use fuseable::{Either, Result};
 use fuseable_derive::Fuseable;
 use isomorphism::BiMap;
 use parse_num::{parse_num, parse_num_padded, ParseError};
 use serde::*;
 use serde_derive::*;
 use std::{cmp::Ordering, collections::HashMap, io::Cursor, str::FromStr};
-use ::log::{trace, log};
 
 #[derive(Debug, Serialize, Deserialize, Hash, Eq, PartialEq, Clone)]
 pub enum Value {
@@ -81,11 +81,9 @@ impl ValueMap {
     pub fn encode(&self, s: String) -> Result<Vec<u8>> {
         match self {
             ValueMap::Keywords(map) => {
-                let v = map.get_right(&s).ok_or(format_err!(
-                    "could not find {:?} in valuemap {:?}",
-                    s,
-                    self
-                ))?;
+                let v = map
+                    .get_right(&s)
+                    .ok_or_else(|| format_err!("could not find {:?} in valuemap {:?}", s, self))?;
                 match v {
                     Value::Value(v) => Ok(v.clone()),
                     _ => {
@@ -124,7 +122,7 @@ impl ValueMap {
                             Ordering::Greater
                         }
                     })
-                    .ok_or(format_err!("could not find {:?} in valuemap {:?}", s, self))?;
+                    .ok_or_else(|| format_err!("could not find {:?} in valuemap {:?}", s, self))?;
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),
@@ -156,11 +154,10 @@ impl ValueMap {
                 let wanted_value: u64 =
                     Cursor::new(parse_num(s.clone())?).read_u64::<BigEndian>()?;
 
-                let (v, _) = map.iter().find(|(_, v)| **v == wanted_value).ok_or(format_err!(
-                    "could not find {} in valuemap {:?}",
-                    s,
-                    self
-                ))?;
+                let (v, _) = map
+                    .iter()
+                    .find(|(_, v)| **v == wanted_value)
+                    .ok_or_else(|| format_err!("could not find {} in valuemap {:?}", s, self))?;
 
                 match v {
                     Value::Value(v) => Ok(v.clone()),

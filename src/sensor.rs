@@ -335,7 +335,7 @@ struct Function {
     addr: Address,
     #[fuseable(ro)]
     desc: Option<Description>,
-    //    #[fuseable(skip)]
+    // #[fuseable(skip)]
     #[serde(default, deserialize_with = "deser_valuemap")]
     map: Option<ValueMap>,
     #[serde(default = "bool_false")]

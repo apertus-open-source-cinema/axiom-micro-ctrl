@@ -1,6 +1,5 @@
 use crate::address::{Address, Slice};
 
-
 // v is a vector of bytes in big endian order
 // shift v by address.slice_start bits to the right
 // and accumulate address.slice_end - address.slice_start bits

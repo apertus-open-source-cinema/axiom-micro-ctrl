@@ -12,17 +12,15 @@ derivative = "*"
 fuse_mt = "*"
 fuseable = { path = "fuseable", features = ["bimap"] }
 fuseable_derive = { path = "fuseable_derive" }
-i2c-linux = "*"
 i2cdev = "*"
 isomorphism = { version = "*", features = ["serde"] }
 itertools = "*"
 lazy_static = "*"
 memmap = "*"
-nom = "*"
 num = "*"
 parse_num = { path = "parse_num" }
-serde = { version = "1.0.85", features = ["rc"] }
-serde_derive = "1.0.85"
+serde = { version = "*", features = ["rc"] }
+serde_derive = "*"
 serde_yaml = "*"
 structopt = "*"
 paste = "*"

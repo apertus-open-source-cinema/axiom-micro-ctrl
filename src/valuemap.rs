@@ -1,4 +1,4 @@
-use ::log::trace;
+use ::log::{log, trace};
 use byteorder::{BigEndian, ReadBytesExt};
 use failure::format_err;
 use fuseable::{Either, Result};
@@ -42,7 +42,6 @@ impl FromStr for Value {
         }
     }
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Fuseable)]
 pub enum ValueMap {

@@ -1,17 +1,8 @@
-#![feature(inner_deref)]
-
-use crate::{sensor::Sensor, serde_util::FILE_OPENER};
+use ctrl::{sensor::Sensor, serde_util::FILE_OPENER};
 use env_logger;
 use fuseable::FuseableWrapper;
 use std::{ffi::OsStr, io::Read, path::PathBuf};
 use structopt::StructOpt;
-
-mod address;
-mod bit_slice;
-mod communication_channel;
-mod sensor;
-mod serde_util;
-mod valuemap;
 
 /// Basic daemon for controlling the various components of a camera
 #[derive(StructOpt, Debug)]

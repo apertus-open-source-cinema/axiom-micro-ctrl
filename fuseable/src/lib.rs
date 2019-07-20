@@ -2,7 +2,7 @@
 use failure::{Error, Fail};
 use fuse_mt::*;
 use itertools::Itertools;
-use log::error;
+use ::log::{error, log};
 use lru::LruCache;
 use std::{
     collections::{BTreeMap, HashMap},

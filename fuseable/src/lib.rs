@@ -545,15 +545,15 @@ impl<'a> FilesystemMT for FuseableWrapper<'a> {
             )
             .map(|v| {
                 (
-                    Timespec { sec: -1, nsec: 0 },
+                    std::time::Duration::from_secs(3600),
                     FileAttr {
                         size: 4096, /* TODO(robin): this is shitty, but needed to convince the
                                      * vfs to actually use the results of a read */
                         blocks: 0,
-                        atime: Timespec { sec: 0, nsec: 0 },
-                        mtime: Timespec { sec: 0, nsec: 0 },
-                        ctime: Timespec { sec: 0, nsec: 0 },
-                        crtime: Timespec { sec: 0, nsec: 0 },
+                        atime: std::time::UNIX_EPOCH,
+                        mtime: std::time::UNIX_EPOCH,
+                        ctime: std::time::UNIX_EPOCH,
+                        crtime: std::time::UNIX_EPOCH,
                         kind: if v { FileType::Directory } else { FileType::RegularFile },
                         perm: 0o777,
                         nlink: 2,

@@ -148,7 +148,7 @@ impl<T: Fuseable> Fuseable for Vec<T> {
 
                 Fuseable::read(v, path)
             }
-            None => Ok(Either::Left((0..(self.len() - 1)).map(|v| v.to_string()).collect())),
+            None => Ok(Either::Left((0..self.len()).map(|v| v.to_string()).collect())),
         }
     }
 

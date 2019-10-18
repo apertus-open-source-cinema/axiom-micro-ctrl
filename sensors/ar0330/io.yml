@@ -3,4 +3,4 @@ reset:
     width: 4
 delay:
     address: '0x4'
-    witdh: 4
+    width: 4

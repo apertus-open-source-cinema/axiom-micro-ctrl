@@ -357,10 +357,9 @@ impl Function {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
                 let channel = self
-                    .channel
-                    .deref()
+                    .channel.as_ref() // .unwrap()
                     .ok_or_else(|| {
-                        format_err!("could not deref communication channel of function {:?}", self)
+                        format_err!("tried to read, but had no communication channel of function {:?}", self)
                     })?
                     .lock()
                     .unwrap();
@@ -383,10 +382,9 @@ impl Function {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
                 let channel = self
-                    .channel
-                    .deref()
+                    .channel.as_ref()
                     .ok_or_else(|| {
-                        format_err!("could not deref communication channel of function {:?}", self)
+                        format_err!("tried to write, but had no communication channel of function {:?}", self)
                     })?
                     .lock()
                     .unwrap();

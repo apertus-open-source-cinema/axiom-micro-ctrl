@@ -1,8 +1,7 @@
 use num::{bigint::Sign, BigInt, Num};
 use std::iter::FromIterator;
 
-// pub type ParseError = String;
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ParseError(String);
 
 impl std::fmt::Display for ParseError {
@@ -531,7 +530,7 @@ mod tests {
     fn masked_number_parsing() {
         assert_eq!(
             parse_num_mask("2z"),
-            Err("invald radix, expected radix of from 2^n for masked numbers".to_owned())
+            Err("invald radix, expected radix of from 2^n for masked numbers".into())
         );
         assert_eq!(parse_num_mask("0x2"), Ok((None, vec![0x2])));
         assert_eq!(parse_num_mask("0b10"), Ok((None, vec![0b10])));

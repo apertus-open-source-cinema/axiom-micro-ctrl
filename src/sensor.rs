@@ -197,6 +197,10 @@ impl Register {
                         return Err(format_err!("value {:?} to write was longer ({}) than register {:?} with width of {}", value, value.len(), self, width));
                     }
 
+                    while value.len() < width as usize {
+                        value.insert(0, 0); // TODO(robin): which way around?, really efficient this way around (vs value.push(0))
+                    }
+
                     let value = match mask {
                         Some(mut mask) => {
                             // TODO(robin): this currently interprets a too short value, as if the
@@ -216,11 +220,7 @@ impl Register {
                             // little endian -- not so intuitive
                             // big endian -- would be more efficient and more intuitive
                             while mask.len() < width as usize {
-                                mask.push(0);
-                            }
-
-                            while value.len() < width as usize {
-                                value.push(0);
+                                mask.insert(0, 0); // TODO(robin): which way around?, really efficient this way around
                             }
 
                             let current_value = comm_channel.read_value(&self.address)?;

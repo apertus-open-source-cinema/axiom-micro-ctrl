@@ -16,7 +16,7 @@ use syn::{
 pub fn fuse_derive(input: TS) -> TS {
     let ast = parse_macro_input!(input as DeriveInput);
     let gen = impl_fuseable(&ast);
-    //    println!("{}", gen);
+    // println!("{}", gen);
     gen.into()
 }
 
@@ -508,16 +508,27 @@ fn impl_fields(
         }
     };
 
-    let write = quote! {
-        match path.next() {
-            Some(ref name) => {
-                match name.as_ref() {
-                    #(stringify!(#fields_write) => Fuseable::write(#wrapped_fields_write, path, value), )*
-                    #(stringify!(#virtual_names_write) => #virtual_writes(path, value), )*
-                    _ => Err(FuseableError::not_found(name)),
+    let write = if fields_write.len() + virtual_names_write.len() > 0 {
+        quote! {
+            match path.next() {
+                Some(ref name) => {
+                    match name.as_ref() {
+                        #(stringify!(#fields_write) => Fuseable::write(#wrapped_fields_write, path, value), )*
+                        #(stringify!(#virtual_names_write) => #virtual_writes(path, value), )*
+                        _ => Err(FuseableError::not_found(name)),
+                    }
                 }
+                None => Err(FuseableError::unsupported("write", type_name(&self))),
             }
-            None => Err(FuseableError::unsupported("write", type_name(&self))),
+        }
+    } else {
+        quote! {
+            match path.next() {
+                Some(ref name) => {
+                    Err(FuseableError::not_found(name))
+                },
+                None => Err(FuseableError::unsupported("write", type_name(&self))),
+            }
         }
     };
 

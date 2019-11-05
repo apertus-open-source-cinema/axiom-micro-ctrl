@@ -5,9 +5,9 @@ use crate::{
     valuemap::*,
 };
 use failure::format_err;
-use fuseable::{type_name, Either, FuseableError};
+use fuseable::{type_name, Either, FuseableError, Fuseable};
 use fuseable_derive::Fuseable;
-use itertools::izip;
+use itertools::{izip, Itertools};
 use num::Num;
 use parse_num::parse_num_mask;
 use serde::{de::Error, Deserialize, Deserializer};
@@ -34,12 +34,6 @@ enum Description {
 // #[fuseable(virtual_field(name = "value", read = "self.read_value", write =
 // "self.write_value", is_dir = "self.value_is_dir"))]
 #[derive(Debug, Serialize, Fuseable, Clone)]
-#[fuseable(virtual_field(
-    name = "value",
-    read = "self.read_value",
-    write = "self.write_value",
-    is_dir = "false"
-))]
 pub struct Register {
     #[fuseable(ro)]
     pub address: Address,
@@ -55,9 +49,6 @@ pub struct Register {
     default: Option<u64>,
     #[fuseable(ro)]
     description: Option<Description>,
-    #[serde(skip)]
-    #[fuseable(ro)]
-    comm_channel: Option<Arc<Mutex<CommunicationChannel>>>,
 }
 
 impl<'de> Deserialize<'de> for Register {
@@ -75,8 +66,6 @@ impl<'de> Deserialize<'de> for Register {
             #[serde(default, deserialize_with = "by_string_option_num")]
             default: Option<u64>,
             description: Option<Description>,
-            #[serde(skip)]
-            comm_channel: Option<Arc<Mutex<CommunicationChannel>>>,
         }
 
         let reg = RegisterStringAddr::deserialize(deserializer)?;
@@ -91,7 +80,6 @@ impl<'de> Deserialize<'de> for Register {
             range: reg.range,
             default: reg.default,
             description: reg.description,
-            comm_channel: reg.comm_channel,
         })
     }
 }
@@ -165,13 +153,11 @@ impl Register {
     fn read_value(
         &self,
         path: &mut dyn Iterator<Item = &str>,
+        comm_channel: &CommunicationChannel
     ) -> fuseable::Result<Either<Vec<String>, String>> {
         match path.next() {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let comm_channel = self.comm_channel.clone().unwrap();
-                let comm_channel = comm_channel.lock().unwrap();
-
                 comm_channel.read_value(&self.address).map(|v| Either::Right(to_hex(v)))
             }
         }
@@ -181,13 +167,11 @@ impl Register {
         &self,
         path: &mut dyn Iterator<Item = &str>,
         value: Vec<u8>,
+        comm_channel: &CommunicationChannel
     ) -> fuseable::Result<()> {
         match path.next() {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let comm_channel = self.comm_channel.clone().unwrap();
-                let comm_channel = comm_channel.lock().unwrap();
-
                 println!("writing");
 
                 if let Some(width) = self.width {
@@ -241,18 +225,147 @@ impl Register {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Fuseable)]
-struct RegisterSet {
-    #[serde(flatten)]
-    registers: HashMap<String, Register>,
+#[derive(Debug)]
+pub struct RegisterSetting {
+    channel: CommunicationChannel,
+    map: HashMap<String, Register>,
+    functions: HashMap<String, Function>,
 }
 
-#[derive(Debug, Fuseable)]
-struct RegisterSetting {
-    #[fuseable(ro)]
-    channel: Arc<Mutex<CommunicationChannel>>,
-    map: RegisterSet,
-    functions: HashMap<String, Function>,
+// #[fuseable(ro)]
+
+impl Fuseable for RegisterSetting {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> fuseable::Result<bool> {
+        match path.next() {
+            Some("channel") => self.channel.is_dir(path),
+            Some("map") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(name), Some("value")) => {
+                        self.map.is_dir(&mut std::iter::once(name)).map(|_| false)
+                    },
+                    _ => self.map.is_dir(&mut path)
+                }
+            }
+            Some("functions") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(name), Some("value")) => {
+                        self.functions.is_dir(&mut std::iter::once(name)).map(|_| false)
+                    },
+                    _ => self.functions.is_dir(&mut path)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Ok(true),
+        }
+    }
+
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> fuseable::Result<Either<Vec<String>, String>> {
+        match path.next() {
+            Some("channel") => self.channel.read(path),
+            Some("map") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(_), None) => {
+                        self.map.read(&mut path).map(|value| {
+                            match value {
+                                Either::Left(mut dir_entries) => {
+                                    dir_entries.push("value".to_owned());
+                                    Either::Left(dir_entries)
+                                },
+                                Either::Right(_) => {
+                                    panic!("tought I would get directory entires, but got file content")
+                                }
+                            }
+                        })
+                    }
+                    (Some(name), Some("value")) => {
+                        self.map.get(name)
+                            .ok_or_else(|| FuseableError::not_found(name))?
+                            .read_value(&mut std::iter::empty(), &self.channel)
+                    },
+                    _ => self.map.read(&mut path)
+                }
+            }
+            Some("functions") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(_), None) => {
+                        self.functions.read(&mut path).map(|value| {
+                            match value {
+                                Either::Left(mut dir_entries) => {
+                                    dir_entries.push("value".to_owned());
+                                    Either::Left(dir_entries)
+                                },
+                                Either::Right(_) => {
+                                    panic!("tought I would get directory entires, but got file content")
+                                }
+                            }
+                        })
+                    }
+                    (Some(name), Some("value")) => {
+                        self.functions.get(name)
+                            .ok_or_else(|| FuseableError::not_found(name))?
+                            .read_value(&mut std::iter::empty(), &self.channel)
+                    },
+                    _ => self.functions.read(&mut path)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Ok(Either::Left(vec!["channel".to_owned(), "map".to_owned(), "functions".to_owned()]))
+        }
+    }
+
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> fuseable::Result<()> {
+        match path.next() {
+            Some("channel") => {
+                Err(FuseableError::unsupported("write", type_name(&self.channel)))
+            }
+            Some("map") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(name), Some("value")) => {
+                        self.map.get(name)
+                            .ok_or_else(|| FuseableError::not_found(name))?
+                            .write_value(&mut std::iter::empty(), value, &self.channel)
+                    },
+                    _ => self.map.write(&mut path, value)
+                }
+            }
+            Some("functions") => {
+                let (mut peek, mut path) = path.tee();
+                let reg_name = peek.next();
+                let reg_field = peek.next();
+
+                match (reg_name, reg_field) {
+                    (Some(name), Some("value")) => {
+                        self.functions.get(name)
+                            .ok_or_else(|| FuseableError::not_found(name))?
+                            .write_value(&mut std::iter::empty(), value, &self.channel)
+                    },
+                    _ => self.functions.write(&mut path, value)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Err(FuseableError::unsupported("write", type_name(&self))),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for RegisterSetting {
@@ -269,36 +382,25 @@ impl<'de> Deserialize<'de> for RegisterSetting {
             #[serde(default = "bool_false")]
             writable: bool,
             default: Option<u64>,
-            #[serde(skip)]
-            channel: Option<Arc<Mutex<CommunicationChannel>>>,
         }
 
         #[derive(Debug, Deserialize)]
         struct RegisterSettingConfig {
             channel: CommunicationChannel,
             #[serde(deserialize_with = "by_path")]
-            map: RegisterSet,
+            map: HashMap<String, Register>,
             #[serde(deserialize_with = "by_path")]
             functions: HashMap<String, FunctionStringAddr>,
         }
 
         let settings = RegisterSettingConfig::deserialize(deserializer)?;
-        let channel = Arc::new(Mutex::new(settings.channel));
 
-        let registers = settings
-            .map
-            .registers
-            .into_iter()
-            .map(|(name, reg)| (name, Register { comm_channel: Some(channel.clone()), ..reg }))
-            .collect::<HashMap<_, _>>();
+        let RegisterSettingConfig { channel, map, functions } = settings;
 
-        let map = RegisterSet { registers: registers.clone() };
-
-        let functions = settings
-            .functions
+        let functions = functions
             .into_iter()
             .map(|(name, func)| {
-                let addr = Address::parse_named(&func.addr, &registers).map_err(|_| {
+                let addr = Address::parse_named(&func.addr, &map).map_err(|_| {
                     D::Error::custom(format!(
                         "could not parse the address of this function ({})",
                         func.addr
@@ -306,9 +408,8 @@ impl<'de> Deserialize<'de> for RegisterSetting {
                 })?;
 
                 Ok((
-                    name,
+                    name.clone(),
                     Function {
-                        channel: Some(channel.clone()),
                         addr,
                         desc: func.desc,
                         map: func.map,
@@ -324,13 +425,7 @@ impl<'de> Deserialize<'de> for RegisterSetting {
 }
 
 #[derive(Debug, Serialize, Fuseable)]
-#[fuseable(virtual_field(
-    name = "value",
-    read = "self.read_value",
-    write = "self.write_value",
-    is_dir = "false"
-))]
-struct Function {
+pub struct Function {
     #[fuseable(ro)]
     addr: Address,
     #[fuseable(ro)]
@@ -343,27 +438,18 @@ struct Function {
     writable: bool,
     #[fuseable(ro)]
     default: Option<u64>,
-    #[serde(skip)]
-    #[fuseable(ro)]
-    channel: Option<Arc<Mutex<CommunicationChannel>>>,
 }
 
 impl Function {
     fn read_value(
         &self,
         path: &mut dyn Iterator<Item = &str>,
+        comm_channel: &CommunicationChannel
     ) -> fuseable::Result<Either<Vec<String>, String>> {
         match path.next() {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let channel = self
-                    .channel.as_ref() // .unwrap()
-                    .ok_or_else(|| {
-                        format_err!("tried to read, but had no communication channel of function {:?}", self)
-                    })?
-                    .lock()
-                    .unwrap();
-                let value = channel.read_value(&self.addr)?;
+                let value = comm_channel.read_value(&self.addr)?;
 
                 match &self.map {
                     Some(map) => map.lookup(value).map(Either::Right),
@@ -377,18 +463,11 @@ impl Function {
         &self,
         path: &mut dyn Iterator<Item = &str>,
         value: Vec<u8>,
+        comm_channel: &CommunicationChannel
     ) -> fuseable::Result<()> {
         match path.next() {
             Some(s) => Err(FuseableError::not_a_directory(type_name(&self), s)),
             None => {
-                let channel = self
-                    .channel.as_ref()
-                    .ok_or_else(|| {
-                        format_err!("tried to write, but had no communication channel of function {:?}", self)
-                    })?
-                    .lock()
-                    .unwrap();
-
                 let value = match &self.map {
                     Some(map) => map.encode(String::from_utf8(value)?)?,
                     None => value,
@@ -396,7 +475,7 @@ impl Function {
 
                 println!("encoded value: {:?}", value);
 
-                channel.write_value(&self.addr, value)
+                comm_channel.write_value(&self.addr, value)
             }
         }
     }
@@ -406,13 +485,13 @@ impl Function {
 pub struct Sensor {
     #[fuseable(ro)]
     model: String,
-    registers: HashMap<String, RegisterSetting>,
+    registers: HashMap<String, Arc<Mutex<RegisterSetting>>>,
 }
 
 impl Sensor {
     pub fn mocked(&mut self, mock: bool) {
         for rs in self.registers.values_mut() {
-            rs.channel.lock().unwrap().mock_mode(mock);
+            rs.lock().unwrap().channel.mock_mode(mock);
         }
     }
 }

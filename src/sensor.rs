@@ -16,6 +16,8 @@ use std::{
     collections::HashMap,
     iter::FromIterator,
     sync::{Arc, Mutex},
+    fmt::Debug,
+    ops::Deref
 };
 
 #[derive(Debug, Serialize, Deserialize, Fuseable, Clone)]
@@ -232,7 +234,33 @@ pub struct RegisterSetting {
     functions: HashMap<String, Function>,
 }
 
-// #[fuseable(ro)]
+impl RegisterSetting {
+    fn read_register(&self, name: &str) -> fuseable::Result<String> {
+        self.map[name].read_value(&mut std::iter::empty(), &self.channel).map(|v| {
+            match v {
+                Either::Right(s) => s,
+                _ => panic!("got directory entries from a register")
+            }
+        })
+    }
+
+    fn write_register<T: ToString>(&self, name: &str, value: T) -> fuseable::Result<()> {
+        self.map[name].write_value(&mut std::iter::empty(), value.to_string().as_bytes().to_vec(), &self.channel)
+    }
+
+    fn read_function(&self, name: &str) -> fuseable::Result<String>  {
+        self.functions[name].read_value(&mut std::iter::empty(), &self.channel).map(|v| {
+            match v {
+                Either::Right(s) => s,
+                _ => panic!("got directory entries from a register")
+            }
+        })
+    }
+
+    fn write_function<T: ToString>(&self, name: &str, value: T) -> fuseable::Result<()>  {
+        self.functions[name].write_value(&mut std::iter::empty(), value.to_string().as_bytes().to_vec(), &self.channel)
+    }
+}
 
 impl Fuseable for RegisterSetting {
     fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> fuseable::Result<bool> {
@@ -470,7 +498,36 @@ impl Function {
             None => {
                 let value = match &self.map {
                     Some(map) => map.encode(String::from_utf8(value)?)?,
-                    None => value,
+                    None =>  {
+                        if let Some(width) = self.addr.bytes() {
+                            let (mask, mut value) = parse_num_mask(String::from_utf8_lossy(&value))?;
+
+                            if value.len() > width as usize {
+                                return Err(format_err!("value {:?} to write was longer ({}) than function {:?} with width of {}", value, value.len(), self, width));
+                            }
+
+                            while value.len() < width as usize {
+                                value.insert(0, 0);
+                            }
+
+                            match mask {
+                                Some(mut mask) => {
+                                    while mask.len() < width as usize {
+                                        mask.insert(0, 0);
+                                    }
+
+                                    let current_value = comm_channel.read_value(&self.addr)?;
+
+                                    izip!(mask, value, current_value)
+                                        .map(|(m, val, cur)| (val & m) | (cur & !m))
+                                        .collect()
+                                }
+                                None => value,
+                            }
+                        } else {
+                            panic!("the function written to {:?} did not specify a width, don't know what to do", self)
+                        }
+                    }
                 };
 
                 println!("encoded value: {:?}", value);
@@ -481,14 +538,150 @@ impl Function {
     }
 }
 
-#[derive(Debug, Deserialize, Fuseable)]
-pub struct Sensor {
-    #[fuseable(ro)]
-    model: String,
-    registers: HashMap<String, Arc<Mutex<RegisterSetting>>>,
+trait Script: Debug + Fuseable {
+    fn read(&self, cam: &Camera) -> fuseable::Result<String>;
+    fn write(&self, cam: &Camera, value: Vec<u8>) -> fuseable::Result<()>;
 }
 
-impl Sensor {
+
+#[derive(Debug, Fuseable)]
+struct Reset {}
+
+impl Script for Reset {
+    fn read(&self, cam: &Camera) -> fuseable::Result<String> {
+        Err(FuseableError::unsupported("read", type_name(&self)))
+    }
+
+    fn write(&self, cam: &Camera, value: Vec<u8>) -> fuseable::Result<()> {
+        println!("writing {:?}", value);
+
+        let sensor_regs = cam.registers["sensor"].lock().unwrap();
+        let sensor_io = cam.registers["sensor_io"].lock().unwrap();
+
+        sensor_io.write_register("reset", 1)?;
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        sensor_io.write_register("reset", 0)?;
+        sensor_regs.write_function("software_reset", 0)?;
+        sensor_regs.write_function("stream", 1)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct Camera {
+    model: String,
+    registers: HashMap<String, Arc<Mutex<RegisterSetting>>>,
+    scripts: HashMap<String, Box<dyn Script>>
+}
+
+impl Fuseable for Camera {
+    fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> fuseable::Result<bool> {
+        match path.next() {
+            Some("model") => self.model.is_dir(path),
+            Some("registers") => self.registers.is_dir(path),
+            Some("scripts") => {
+                let (mut peek, mut path) = path.tee();
+                let script_name = peek.next();
+                let script_field = peek.next();
+
+                match (script_name, script_field) {
+                    (Some(name), Some("value")) => {
+                        self.scripts.is_dir(&mut std::iter::once(name)).map(|_| false)
+                    },
+                    _ => self.scripts.is_dir(&mut path)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Ok(true),
+        }
+    }
+
+    fn read(&self, path: &mut dyn Iterator<Item = &str>) -> fuseable::Result<Either<Vec<String>, String>> {
+        match path.next() {
+            Some("model") => self.model.read(path),
+            Some("registers") => self.registers.read(path),
+            Some("scripts") => {
+                let (mut peek, mut path) = path.tee();
+                let script_name = peek.next();
+                let script_field = peek.next();
+
+                match (script_name, script_field) {
+                    (Some(_), None) => {
+                        self.scripts.read(&mut path).map(|value| {
+                            match value {
+                                Either::Left(mut dir_entries) => {
+                                    dir_entries.push("value".to_owned());
+                                    Either::Left(dir_entries)
+                                },
+                                Either::Right(_) => {
+                                    panic!("tought I would get directory entires, but got file content")
+                                }
+                            }
+                        })
+                    }
+                    (Some(name), Some("value")) => {
+                        Script::read(self.scripts.get(name)
+                                     .ok_or_else(|| FuseableError::not_found(name))?.deref(), &self)
+                            .map(|v| Either::Right(v))
+                    },
+                    _ => self.scripts.read(&mut path)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Ok(Either::Left(vec!["model".to_owned(), "registers".to_owned(), "scripts".to_owned()]))
+        }
+    }
+
+    fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> fuseable::Result<()> {
+        match path.next() {
+            Some("model") => {
+                Err(FuseableError::unsupported("write", "Camera.model"))
+            }
+            Some("registers") => {
+                self.registers.write(path, value)
+            }
+            Some("scripts") => {
+                let (mut peek, mut path) = path.tee();
+                let script_name = peek.next();
+                let script_field = peek.next();
+
+                match (script_name, script_field) {
+                    (Some(name), Some("value")) => {
+                        Script::write(self.scripts.get(name)
+                                     .ok_or_else(|| FuseableError::not_found(name))?.deref(), &self, value)
+                    },
+                    _ => self.scripts.write(&mut path, value)
+                }
+            }
+            Some(name) => Err(FuseableError::not_found(name)),
+            None => Err(FuseableError::unsupported("write", type_name(&self))),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Camera {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug, Deserialize)]
+        pub struct CameraWithoutScripts {
+            model: String,
+            registers: HashMap<String, Arc<Mutex<RegisterSetting>>>,
+        }
+
+        let CameraWithoutScripts { model, registers } = CameraWithoutScripts::deserialize(deserializer)?;
+
+        let mut scripts = HashMap::new();
+        let reset: Box<dyn Script> = Box::new(Reset {});
+        scripts.insert("reset".to_owned(), reset);
+
+        Ok(Camera { scripts, model, registers })
+    }
+}
+
+impl Camera {
     pub fn mocked(&mut self, mock: bool) {
         for rs in self.registers.values_mut() {
             rs.lock().unwrap().channel.mock_mode(mock);

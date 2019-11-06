@@ -65,7 +65,7 @@ impl FuseableError {
 
 pub fn type_name<T>(_: &T) -> &'static str { unsafe { std::intrinsics::type_name::<T>() } }
 
-pub trait Fuseable: Sync + Send {
+pub trait Fuseable {
     fn is_dir(&self, path: &mut dyn Iterator<Item = &str>) -> Result<bool>;
     fn read(&self, path: &mut dyn Iterator<Item = &str>) -> Result<Either<Vec<String>, String>>;
     fn write(&mut self, path: &mut dyn Iterator<Item = &str>, value: Vec<u8>) -> Result<()>;

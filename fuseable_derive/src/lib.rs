@@ -495,16 +495,27 @@ fn impl_fields(
 
     all_fields.append(&mut virtual_names_read.clone());
 
-    let read = quote! {
-        match path.next() {
-            Some(ref name) => {
-                match name.as_ref() {
-                    #(stringify!(#fields_read) => Fuseable::read(#wrapped_fields_read, path), )*
-                    #(stringify!(#virtual_names_read) => #virtual_reads(path), )*
-                    _ => Err(FuseableError::not_found(name)),
+    let read = if fields_read.len() + virtual_names_read.len() > 0 {
+        quote! {
+            match path.next() {
+                Some(ref name) => {
+                    match name.as_ref() {
+                        #(stringify!(#fields_read) => Fuseable::read(#wrapped_fields_read, path), )*
+                        #(stringify!(#virtual_names_read) => #virtual_reads(path), )*
+                        _ => Err(FuseableError::not_found(name)),
+                    }
                 }
+                None => Ok(Either::Left(vec![#(stringify!(#all_fields).to_string()),*]))
             }
-            None => Ok(Either::Left(vec![#(stringify!(#all_fields).to_string()),*]))
+        }
+    } else {
+        quote! {
+            match path.next() {
+                Some(ref name) => {
+                    Err(FuseableError::not_found(name))
+                },
+                None => Ok(Either::Left(vec![])),
+            }
         }
     };
 
@@ -549,16 +560,25 @@ fn impl_fields(
         })
         .collect();
 
-    let is_dir = quote! {
-        match path.next() {
-            Some(ref name) => {
-                match name.as_ref() {
-                    #(stringify!(#fields_is_dir) => Fuseable::is_dir(#wrapped_fields_is_dir, path), )*
-                    #(#is_dirs_impls)*
-                    _ => Err(FuseableError::not_found(name)),
+    let is_dir = if fields_is_dir.len() + is_dirs_impls.len() > 0 {
+        quote! {
+            match path.next() {
+                Some(ref name) => {
+                    match name.as_ref() {
+                        #(stringify!(#fields_is_dir) => Fuseable::is_dir(#wrapped_fields_is_dir, path), )*
+                        #(#is_dirs_impls)*
+                        _ => Err(FuseableError::not_found(name)),
+                    }
                 }
+                None => Ok(true)
             }
-            None => Ok(true)
+        }
+    } else {
+        quote! {
+            match path.next() {
+                Some(ref name) => Err(FuseableError::not_found(name)),
+                None => Ok(true)
+            }
         }
     };
 

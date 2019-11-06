@@ -177,10 +177,12 @@ impl Address {
         })
     }
 
-    // the slice is nontrivial if it doesn't start and end at a byte boundary
+    // the slice is nontrivial if it doesn't start or end at a byte boundary
     pub fn nontrivial_slice(&self) -> bool {
         match self.slice {
-            Some(Slice { start, end }) => ((start % 8) == 0) && ((end % 8) == 0),
+            Some(Slice { start, end }) => {
+                ((start % 8) != 0) || ((end % 8) != 0)
+            }
             None => true,
         }
     }
